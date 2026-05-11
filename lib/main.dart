@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'login_screen.dart';
+import 'signup_screen.dart';
+import 'barber_setup/step1_screen.dart';
 
 void main() {
   runApp(const MyApp());
@@ -12,7 +14,6 @@ class MyApp extends StatelessWidget {
   Widget build(BuildContext context) {
     return const MaterialApp(
       debugShowCheckedModeBanner: false,
-      scrollBehavior: NoGlowScrollBehavior(),
       home: RoleSelectionScreen(),
     );
   }
@@ -23,54 +24,94 @@ class RoleSelectionScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isTablet = MediaQuery.of(context).size.width >= 600;
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isDesktop = size.width >= 1100;
 
     return Scaffold(
       backgroundColor: Colors.white,
       body: SafeArea(
-        child: isTablet ? _tabletLayout(context) : _mobileLayout(context),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: isDesktop
+                  ? 900
+                  : (isTablet ? 700 : double.infinity),
+            ),
+            child: isTablet
+                ? _tabletLayout(context)
+                : _mobileLayout(context),
+          ),
+        ),
       ),
     );
   }
 
-  // 📱 MOBILE
+  /// 📱 MOBILE
   Widget _mobileLayout(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [
-          _image(),
-          const SizedBox(height: 30),
-          _text(),
-          const SizedBox(height: 30),
-          _buttons(context),
-          const SizedBox(height: 20),
-          _loginLink(context), // 🔥 FIXED
-        ],
-      ),
-    );
-  }
+  return LayoutBuilder(
+    builder: (context, constraints) {
+      return SingleChildScrollView(
+        physics: const ClampingScrollPhysics(),
+        child: ConstrainedBox(
+          constraints: BoxConstraints(
+            minHeight: constraints.maxHeight,
+          ),
+          child: IntrinsicHeight(
+            child: Padding(
+              padding: const EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Expanded(
+                    flex: 4,
+                    child: _image(),
+                  ),
 
-  // 📟 TABLET
+                  const SizedBox(height: 20),
+
+                  _text(),
+
+                  const SizedBox(height: 20),
+
+                  _buttons(context),
+
+                  const SizedBox(height: 10),
+
+                  _loginLink(context),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+    },
+  );
+}
+
+  /// 📟 TABLET / DESKTOP
   Widget _tabletLayout(BuildContext context) {
     return Row(
       children: [
-        Expanded(flex: 5, child: _image()),
-
         Expanded(
-          flex: 4,
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(32),
-              child: Column(
-                children: [
-                  _text(),
-                  const SizedBox(height: 40),
-                  _buttons(context),
-                  const SizedBox(height: 20),
-                  _loginLink(context), // 🔥 FIXED
-                ],
-              ),
+          flex: 5,
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: _image(),
+          ),
+        ),
+        Expanded(
+          flex: 5,
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                _text(),
+                const SizedBox(height: 30),
+                _buttons(context),
+                const SizedBox(height: 10),
+                _loginLink(context),
+              ],
             ),
           ),
         ),
@@ -78,48 +119,36 @@ class RoleSelectionScreen extends StatelessWidget {
     );
   }
 
-  // 🔥 IMAGE
+  /// 🖼️ IMAGE
   Widget _image() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
       child: AspectRatio(
         aspectRatio: 4 / 5,
-        child: Image.asset("assets/salon.png", fit: BoxFit.cover),
+        child: Image.asset(
+          "assets/salon.png",
+          fit: BoxFit.cover,
+        ),
       ),
     );
   }
 
-  // 🔥 TEXT
+  /// ✨ TEXT
   Widget _text() {
     return Column(
-      children: [
-        // 🔥 ICON ROW
-        Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: const [
-            Icon(Icons.content_cut, size: 24),
-            SizedBox(width: 10),
-            Icon(
-              Icons.face_retouching_natural,
-              size: 24,
-              color: Color(0xFF6FCF97),
-            ), // comb alternative
-            SizedBox(width: 10),
-            Icon(Icons.air, size: 24), // dryer alternative
-          ],
-        ),
-
-        const SizedBox(height: 20),
-
-        const Text(
+      children: const [
+        Icon(Icons.content_cut, size: 28),
+        SizedBox(height: 10),
+        Text(
           "Look Good.\nFeel Your Best.",
           textAlign: TextAlign.center,
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+          style: TextStyle(
+            fontSize: 26,
+            fontWeight: FontWeight.bold,
+          ),
         ),
-
-        const SizedBox(height: 10),
-
-        const Text(
+        SizedBox(height: 10),
+        Text(
           "Book salons & barbers near you",
           textAlign: TextAlign.center,
           style: TextStyle(color: Colors.grey),
@@ -128,7 +157,7 @@ class RoleSelectionScreen extends StatelessWidget {
     );
   }
 
-  // 🔥 BUTTONS
+  /// 🔘 BUTTONS
   Widget _buttons(BuildContext context) {
     return Column(
       children: [
@@ -143,15 +172,17 @@ class RoleSelectionScreen extends StatelessWidget {
               ),
             ),
             onPressed: () {
-              // Navigator.push(
-              //   context,
-              //   MaterialPageRoute(builder: (_) => const LoginScreen()),
-              // );
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const SignupScreen(),
+                ),
+              );
             },
             child: const Text("Continue as Customer"),
           ),
         ),
-        const SizedBox(height: 15),
+        const SizedBox(height: 12),
         SizedBox(
           width: double.infinity,
           height: 55,
@@ -162,7 +193,14 @@ class RoleSelectionScreen extends StatelessWidget {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            onPressed: () {},
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (_) => const Step1Screen(),
+                ),
+              );
+            },
             child: const Text(
               "Join as Professional",
               style: TextStyle(color: Color(0xFF6FCF97)),
@@ -173,32 +211,27 @@ class RoleSelectionScreen extends StatelessWidget {
     );
   }
 
-  // 🔥 LOGIN LINK (MISSING FIX)
+  /// 🔗 LOGIN LINK
   Widget _loginLink(BuildContext context) {
     return GestureDetector(
       onTap: () {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          MaterialPageRoute(
+            builder: (_) => const LoginScreen(),
+          ),
         );
       },
-      child: const Text(
-        "Already have an account? Login",
-        style: TextStyle(color: Color(0xFF6FCF97), fontWeight: FontWeight.bold),
+      child: const Padding(
+        padding: EdgeInsets.only(top: 10),
+        child: Text(
+          "Already have an account? Login",
+          style: TextStyle(
+            color: Color(0xFF6FCF97),
+            fontWeight: FontWeight.bold,
+          ),
+        ),
       ),
     );
-  }
-}
-
-class NoGlowScrollBehavior extends ScrollBehavior {
-  const NoGlowScrollBehavior();
-
-  @override
-  Widget buildOverscrollIndicator(
-    BuildContext context,
-    Widget child,
-    ScrollableDetails details,
-  ) {
-    return child; // 🚫 removes glow
   }
 }

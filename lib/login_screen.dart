@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'otp_screen.dart';
+import 'package:no_wait_app/services/api_service.dart';
+import 'widgets/loading_widget.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -12,49 +14,63 @@ class _LoginScreenState extends State<LoginScreen> {
   final TextEditingController phoneController = TextEditingController();
 
   @override
+  void dispose() {
+    phoneController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final isTablet = MediaQuery.of(context).size.width >= 600;
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final isDesktop = size.width >= 1100;
 
     return Scaffold(
       backgroundColor: Colors.white,
       resizeToAvoidBottomInset: true,
-      body: SafeArea(child: isTablet ? _tabletLayout() : _mobileLayout()),
-    );
-  }
-
-  // 📱 MOBILE
-  Widget _mobileLayout() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [_image(), const SizedBox(height: 25), _content()],
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: isDesktop ? 900 : (isTablet ? 700 : double.infinity),
+            ),
+            child: isTablet ? _tabletLayout(context) : _mobileLayout(context),
+          ),
+        ),
       ),
     );
   }
 
-  // 📟 TABLET (split layout)
-  Widget _tabletLayout() {
+  /// 📱 MOBILE
+  Widget _mobileLayout(BuildContext context) {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(
+        children: [_image(), const SizedBox(height: 20), _content(context)],
+      ),
+    );
+  }
+
+  /// 📟 TABLET / DESKTOP
+  Widget _tabletLayout(BuildContext context) {
     return Row(
       children: [
         Expanded(
           flex: 5,
-          child: Padding(padding: const EdgeInsets.all(24), child: _image()),
+          child: Padding(padding: const EdgeInsets.all(20), child: _image()),
         ),
         Expanded(
-          flex: 4,
-          child: Center(
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.all(32),
-              child: _content(),
-            ),
+          flex: 5,
+          child: SingleChildScrollView(
+            padding: const EdgeInsets.all(32),
+            child: _content(context),
           ),
         ),
       ],
     );
   }
 
-  // 🔥 IMAGE
+  /// 🖼 IMAGE
   Widget _image() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
@@ -65,39 +81,47 @@ class _LoginScreenState extends State<LoginScreen> {
     );
   }
 
-  // 🔥 MAIN CONTENT
-  Widget _content() {
+  /// 🔥 CONTENT
+  Widget _content(BuildContext context) {
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // ICONS (same theme as main screen)
+        /// ICONS
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
-            Icon(Icons.content_cut, size: 22),
+            Icon(Icons.content_cut, size: 24),
             SizedBox(width: 10),
             Icon(
               Icons.face_retouching_natural,
-              size: 22,
+              size: 24,
               color: Color(0xFF6FCF97),
             ),
             SizedBox(width: 10),
-            Icon(Icons.air, size: 22),
+            Icon(Icons.air, size: 24),
           ],
         ),
 
         const SizedBox(height: 20),
 
-        const Text(
-          "Welcome Back!",
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        const Center(
+          child: Text(
+            "Welcome Back!",
+            textAlign: TextAlign.center,
+            style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+          ),
         ),
 
         const SizedBox(height: 8),
 
-        const Text(
-          "Login to continue and book your next appointment.",
-          style: TextStyle(color: Colors.grey),
+        const Center(
+          child: Text(
+            "Login to continue and book your next appointment.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey),
+          ),
         ),
 
         const SizedBox(height: 25),
@@ -128,10 +152,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
         const SizedBox(height: 30),
 
-        // SEND OTP BUTTON
+        /// 🔥 BUTTON
         SizedBox(
           width: double.infinity,
-          height: 55,
+          height: isTablet ? 60 : 55,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6FCF97),
@@ -139,13 +163,51 @@ class _LoginScreenState extends State<LoginScreen> {
                 borderRadius: BorderRadius.circular(14),
               ),
             ),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (_) => OtpScreen(phone: phoneController.text),
-                ),
+            onPressed: () async {
+              final phone = phoneController.text.trim();
+
+              if (phone.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text("Please enter mobile number")),
+                );
+                return;
+              }
+
+              FocusScope.of(context).unfocus();
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (_) => const LoadingWidget(),
               );
+
+              try {
+                final res = await ApiService.requestLoginOtp(phone: phone);
+
+                if (!context.mounted) return;
+                Navigator.of(context, rootNavigator: true).pop();
+
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => OtpScreen(
+                      phone: phone,
+                      email: res['email']?.toString() ?? '',
+                      resendRemaining: res['resendRemaining'] as int? ?? 3,
+                      expiresInSeconds: res['expiresInSeconds'] as int? ?? 300,
+                    ),
+                  ),
+                );
+              } catch (e) {
+                if (!context.mounted) return;
+                Navigator.of(context, rootNavigator: true).pop();
+
+                final message = e is ApiException
+                    ? e.message
+                    : "Failed to send OTP";
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(content: Text(message)),
+                );
+              }
             },
             child: const Text("Send OTP", style: TextStyle(fontSize: 16)),
           ),
@@ -153,12 +215,10 @@ class _LoginScreenState extends State<LoginScreen> {
 
         const SizedBox(height: 20),
 
-        // BACK LINK (important UX)
+        /// 🔥 BACK
         Center(
           child: GestureDetector(
-            onTap: () {
-              Navigator.pop(context);
-            },
+            onTap: () => Navigator.pop(context),
             child: const Text(
               "Back",
               style: TextStyle(
