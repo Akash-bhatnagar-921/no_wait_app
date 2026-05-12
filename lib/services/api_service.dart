@@ -19,7 +19,7 @@ class ApiException implements Exception {
 class ApiService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: "http://192.168.29.19:3000",
+    defaultValue: "http://192.168.1.25:3000",
   );
   static const Duration requestTimeout = Duration(seconds: 15);
   static Map<String, dynamic> loginData = {};
@@ -35,18 +35,15 @@ class ApiService {
     required int age,
     required String gender,
   }) async {
-    final response = await _postJson(
-      '/auth/register',
-      {
-        "phone": phone,
-        "role": role,
-        "name": name,
-        "email": email,
-        "age": age,
-        "gender": gender,
-        "hasAcceptedTerms": true,
-      },
-    );
+    final response = await _postJson('/auth/register', {
+      "phone": phone,
+      "role": role,
+      "name": name,
+      "email": email,
+      "age": age,
+      "gender": gender,
+      "hasAcceptedTerms": true,
+    });
 
     return _decodeResponse(response, 'Registration failed');
   }
@@ -72,10 +69,9 @@ class ApiService {
   static Future<Map<String, dynamic>> requestLoginOtp({
     required String phone,
   }) async {
-    final response = await _postJson(
-      '/auth/login/request-otp',
-      {"phone": phone},
-    );
+    final response = await _postJson('/auth/login/request-otp', {
+      "phone": phone,
+    });
 
     return _decodeResponse(response, 'Failed to send OTP');
   }
@@ -84,10 +80,10 @@ class ApiService {
     required String phone,
     required String otp,
   }) async {
-    final response = await _postJson(
-      '/auth/login/verify-otp',
-      {"phone": phone, "otp": otp},
-    );
+    final response = await _postJson('/auth/login/verify-otp', {
+      "phone": phone,
+      "otp": otp,
+    });
 
     final data = _decodeResponse(response, 'OTP verification failed');
     loginData = data;
@@ -144,33 +140,40 @@ class ApiService {
   static Future<Map<String, dynamic>> createSalon({
     required SalonOnboardingModel salonData,
   }) async {
-    final token = await getToken();
-    print("TOKEN: $token");
+    // final token = await getToken();
+    // print("TOKEN: $token");
+    try {
+      print(salonData.salonName);
+      final response = await http.post(
+        Uri.parse('$baseUrl/salons'),
+        headers: {
+          'Content-Type': 'application/json',
+          // 'Authorization': 'Bearer $token',
+        },
+        body: jsonEncode({
+          "salonName": salonData.salonName,
+          "address": salonData.address,
+          "city": salonData.city,
+          "pincode": salonData.pincode,
+          "state": salonData.state,
+          "landmark": salonData.landmark,
+          "contactNumber": salonData.contactNumber,
+          "shopEmail": salonData.shopEmail,
 
-    final response = await http.post(
-      Uri.parse('$baseUrl/salons'),
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': 'Bearer $token',
-      },
-      body: jsonEncode({
-        "salonName": salonData.salonName,
-        "address": salonData.address,
-        "city": salonData.city,
-        "pincode": salonData.pincode,
-        "state": salonData.state,
-        "landmark": salonData.landmark,
-        "contactNumber": salonData.contactNumber,
-        "shopEmail": salonData.shopEmail,
+          "services": salonData.services,
+          "amenities": salonData.amenities,
 
-        "services": salonData.services,
-        "amenities": salonData.amenities,
+          "barbers": salonData.barbers,
+        }),
+      );
 
-        "barbers": salonData.barbers,
-      }),
-    );
+      print(response.statusCode);
 
-    return jsonDecode(response.body);
+      return jsonDecode(response.body);
+    } catch (e) {
+      print(e);
+      throw new Error();
+    }
   }
 
   static Future<UserProfileModel?> getProfile() async {

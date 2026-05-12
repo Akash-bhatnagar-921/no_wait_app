@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:no_wait_app/home_screen.dart';
 import 'models/salon_onboarding_model.dart';
 import 'package:no_wait_app/services/api_service.dart';
+import 'package:no_wait_app/barber_setup/barber_home_screen.dart';
 
 class Step3Screen extends StatefulWidget {
   final SalonOnboardingModel salonData;
@@ -268,6 +269,7 @@ class _Step3ScreenState extends State<Step3Screen> {
 
                     try {
                       print("CALLING CREATE SALON API");
+                      print(widget.salonData.barbers);
 
                       final res = await ApiService.createSalon(
                         salonData: widget.salonData,
@@ -281,7 +283,7 @@ class _Step3ScreenState extends State<Step3Screen> {
 
                       Navigator.pushAndRemoveUntil(
                         context,
-                        MaterialPageRoute(builder: (_) => const HomeScreen()),
+                        MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen()),
                         (route) => false,
                       );
                     } catch (e) {
