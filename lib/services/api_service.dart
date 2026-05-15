@@ -19,7 +19,7 @@ class ApiException implements Exception {
 class ApiService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: "http://192.168.1.25:3000",
+    defaultValue: "http://192.168.1.5:3000",
   );
   static const Duration requestTimeout = Duration(seconds: 15);
   static Map<String, dynamic> loginData = {};
@@ -110,6 +110,15 @@ class ApiService {
     return token;
   }
 
+  // ================= PHONE CHECK =================
+
+  static Future<Map<String, dynamic>> checkPhone(String phone) async {
+    final response = await http
+        .get(Uri.parse('$baseUrl/auth/check-phone?phone=$phone'))
+        .timeout(requestTimeout);
+    return _decodeResponse(response, 'Phone check failed');
+  }
+
   // ================= SERVICES =================
 
   static Future<List<dynamic>> getServices() async {
@@ -121,8 +130,104 @@ class ApiService {
 
   static Future<List<dynamic>> getAmenities() async {
     final res = await http.get(Uri.parse('$baseUrl/salons/amenities'));
-
     return jsonDecode(res.body);
+  }
+
+  // ================= NEARBY SALONS =================
+
+  static Future<List<dynamic>> nearbySalons({
+    required double lat,
+    required double lng,
+    double radiusKm = 1,
+  }) async {
+    return searchSalons(lat: lat, lng: lng, radiusKm: radiusKm);
+  }
+
+  // ================= SEARCH SALONS (full filters) =================
+
+  static Future<List<dynamic>> searchSalons({
+    required double lat,
+    required double lng,
+    double radiusKm = 1,
+    List<String> amenities = const [],
+    List<String> services  = const [],
+    String sort = 'distance_asc',
+  }) async {
+    final params = <String, String>{
+      'lat':    lat.toString(),
+      'lng':    lng.toString(),
+      'radius': radiusKm.toString(),
+      'sort':   sort,
+      if (amenities.isNotEmpty) 'amenities': amenities.join(','),
+      if (services.isNotEmpty)  'services':  services.join(','),
+    };
+    final uri = Uri.parse('$baseUrl/salons/nearby').replace(queryParameters: params);
+    try {
+      final response = await http.get(uri).timeout(requestTimeout);
+      if (response.statusCode != 200) return [];
+      return jsonDecode(response.body) as List<dynamic>;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  // ================= FRANCHISE SEARCH =================
+
+  static Future<List<dynamic>> searchFranchises(String query) async {
+    final encoded = Uri.encodeComponent(query);
+    final res = await http
+        .get(Uri.parse('$baseUrl/salons/franchises?q=$encoded'))
+        .timeout(requestTimeout);
+    if (res.statusCode != 200) return [];
+    return jsonDecode(res.body) as List<dynamic>;
+  }
+
+  // ================= VERIFY SALON CODE (2-step login) =================
+
+  static Future<Map<String, dynamic>> verifySalonCode({
+    required String phone,
+    required String code,
+  }) async {
+    final response = await _postJson('/salons/verify-code', {
+      "phone": phone,
+      "code": code,
+    });
+    return _decodeResponse(response, 'Invalid secret code');
+  }
+
+  // ================= MY SALONS (for professional login check) =================
+
+  static Future<List<dynamic>> getMySalons() async {
+    final token = await getToken();
+    if (token == null) return [];
+    final response = await http
+        .get(
+          Uri.parse('$baseUrl/salons/my'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+        )
+        .timeout(requestTimeout);
+    if (response.statusCode != 200) return [];
+    return jsonDecode(response.body) as List<dynamic>;
+  }
+
+  // ================= DELETE ACCOUNT =================
+
+  static Future<Map<String, dynamic>> deleteAccount() async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final response = await http
+        .delete(
+          Uri.parse('$baseUrl/users/me'),
+          headers: {
+            'Authorization': 'Bearer $token',
+            'Content-Type': 'application/json',
+          },
+        )
+        .timeout(requestTimeout);
+    return _decodeResponse(response, 'Failed to delete account');
   }
 
   // ================= LOGOUT =================
@@ -140,40 +245,42 @@ class ApiService {
   static Future<Map<String, dynamic>> createSalon({
     required SalonOnboardingModel salonData,
   }) async {
-    // final token = await getToken();
-    // print("TOKEN: $token");
-    try {
-      print(salonData.salonName);
-      final response = await http.post(
-        Uri.parse('$baseUrl/salons'),
-        headers: {
-          'Content-Type': 'application/json',
-          // 'Authorization': 'Bearer $token',
-        },
-        body: jsonEncode({
-          "salonName": salonData.salonName,
-          "address": salonData.address,
-          "city": salonData.city,
-          "pincode": salonData.pincode,
-          "state": salonData.state,
-          "landmark": salonData.landmark,
-          "contactNumber": salonData.contactNumber,
-          "shopEmail": salonData.shopEmail,
+    print("Inside create salon");
+    final response = await http
+        .post(
+          Uri.parse('$baseUrl/salons'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            "salonName":     salonData.salonName,
+            "address":       salonData.address,
+            "city":          salonData.city,
+            "pincode":       salonData.pincode,
+            "state":         salonData.state,
+            "landmark":      salonData.landmark,
+            // Salon phone = login credential (stored in User.phone)
+            "contactNumber": salonData.contactNumber,
+            "shopEmail":     salonData.shopEmail,
+            // Business owner — ownership records only, NOT used for login
+            "ownerName":     salonData.ownerName,
+            if (salonData.ownerPhone.isNotEmpty)
+              "ownerPhone":  salonData.ownerPhone,
+            "openingTime":   salonData.openingTime,
+            "closingTime":   salonData.closingTime,
+            "workingDays":   salonData.workingDays.join(','),
+            "services":      salonData.services,
+            "amenities":     salonData.amenities,
+            "barbers":       salonData.barbers,
+            if (salonData.franchiseId.isNotEmpty)
+              "franchiseId":   salonData.franchiseId,
+            if (salonData.franchiseName.isNotEmpty)
+              "franchiseName": salonData.franchiseName,
+          }),
+        )
+        .timeout(requestTimeout);
 
-          "services": salonData.services,
-          "amenities": salonData.amenities,
+        print(response.body);
 
-          "barbers": salonData.barbers,
-        }),
-      );
-
-      print(response.statusCode);
-
-      return jsonDecode(response.body);
-    } catch (e) {
-      print(e);
-      throw new Error();
-    }
+    return _decodeResponse(response, 'Failed to create salon');
   }
 
   static Future<UserProfileModel?> getProfile() async {

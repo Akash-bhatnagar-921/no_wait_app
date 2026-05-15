@@ -13,15 +13,35 @@ class Step2Screen extends StatefulWidget {
 
 class _Step2ScreenState extends State<Step2Screen> {
   final descController = TextEditingController();
+
+  // Working hours state
+  List<String> selectedDays = [];
+  TimeOfDay _openingTime = const TimeOfDay(hour: 9, minute: 0);
+  TimeOfDay _closingTime = const TimeOfDay(hour: 21, minute: 0);
+  final List<String> _allDays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
+
   @override
   void initState() {
     super.initState();
-
     selectedServices = widget.salonData.services;
     selectedAmenities = widget.salonData.amenities;
-
     descController.text = widget.salonData.description;
+    selectedDays = List<String>.from(widget.salonData.workingDays);
+    _openingTime = _parseTime(widget.salonData.openingTime);
+    _closingTime = _parseTime(widget.salonData.closingTime);
   }
+
+  TimeOfDay _parseTime(String t) {
+    try {
+      final parts = t.split(':');
+      return TimeOfDay(hour: int.parse(parts[0]), minute: int.parse(parts[1]));
+    } catch (_) {
+      return const TimeOfDay(hour: 9, minute: 0);
+    }
+  }
+
+  String _formatTime(TimeOfDay t) =>
+      '${t.hour.toString().padLeft(2, '0')}:${t.minute.toString().padLeft(2, '0')}';
 
   List<String> selectedServices = [];
   List<String> selectedAmenities = [];
@@ -84,7 +104,7 @@ class _Step2ScreenState extends State<Step2Screen> {
           const SizedBox(height: 25),
 
           /// 🔥 STEP INDICATOR
-          _mobileStepIndicator(1),
+          _mobileStepIndicator(2),
 
           const SizedBox(height: 25),
 
@@ -152,9 +172,9 @@ class _Step2ScreenState extends State<Step2Screen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        _stepItem("1", "Salon Details", true),
+                        _stepItem("1", "Salon Details", false),
                         const SizedBox(height: 55),
-                        _stepItem("2", "Services", false),
+                        _stepItem("2", "Services", true),
                         const SizedBox(height: 55),
                         _stepItem("3", "Barbers", false),
                       ],
@@ -185,11 +205,140 @@ class _Step2ScreenState extends State<Step2Screen> {
     );
   }
 
+  // ─── Working Hours Section ────────────────────────────────────────────────
+  Widget _workingHoursSection(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Working Hours",
+          style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          "Customers can book within these hours",
+          style: TextStyle(color: Colors.grey, fontSize: 12),
+        ),
+        const SizedBox(height: 14),
+
+        // Days chips
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: _allDays.map((day) {
+            final selected = selectedDays.contains(day);
+            return GestureDetector(
+              onTap: () => setState(() {
+                selected ? selectedDays.remove(day) : selectedDays.add(day);
+              }),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: selected
+                      ? const Color(0xFF6FCF97)
+                      : Colors.grey.shade100,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(
+                    color: selected
+                        ? const Color(0xFF6FCF97)
+                        : Colors.grey.shade300,
+                  ),
+                ),
+                child: Text(
+                  day,
+                  style: TextStyle(
+                    color: selected ? Colors.white : Colors.black87,
+                    fontWeight: FontWeight.w500,
+                    fontSize: 13,
+                  ),
+                ),
+              ),
+            );
+          }).toList(),
+        ),
+
+        const SizedBox(height: 16),
+
+        // Opening + Closing time row
+        Row(
+          children: [
+            Expanded(child: _timePicker("Opening Time", _openingTime, (t) {
+              setState(() => _openingTime = t);
+            }, context)),
+            const SizedBox(width: 12),
+            Expanded(child: _timePicker("Closing Time", _closingTime, (t) {
+              setState(() => _closingTime = t);
+            }, context)),
+          ],
+        ),
+      ],
+    );
+  }
+
+  Widget _timePicker(
+    String label,
+    TimeOfDay value,
+    void Function(TimeOfDay) onPicked,
+    BuildContext context,
+  ) {
+    return GestureDetector(
+      onTap: () async {
+        final picked = await showTimePicker(
+          context: context,
+          initialTime: value,
+          builder: (ctx, child) => MediaQuery(
+            data: MediaQuery.of(ctx).copyWith(alwaysUse24HourFormat: true),
+            child: child!,
+          ),
+        );
+        if (picked != null) onPicked(picked);
+      },
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
+        decoration: BoxDecoration(
+          color: Colors.grey.shade100,
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey.shade300),
+        ),
+        child: Row(
+          children: [
+            const Icon(Icons.access_time, size: 18, color: Color(0xFF6FCF97)),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(label,
+                      style: const TextStyle(
+                          color: Colors.grey, fontSize: 11)),
+                  const SizedBox(height: 2),
+                  Text(
+                    _formatTime(value),
+                    style: const TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 15),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   // 🔥 FORM CONTENT
   Widget _form(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Working Hours ──────────────────────────────────────────────────
+        _workingHoursSection(context),
+
+        const SizedBox(height: 28),
+        const Divider(),
+        const SizedBox(height: 16),
+
         _multiSelectField(
           title: "Select Services Offered",
           hint: "Select Services",
@@ -260,9 +409,9 @@ class _Step2ScreenState extends State<Step2Screen> {
                     widget.salonData.services = selectedServices;
                     widget.salonData.amenities = selectedAmenities;
                     widget.salonData.description = descController.text;
-
-                    print(widget.salonData.services);
-                    print(widget.salonData.amenities);
+                    widget.salonData.workingDays = selectedDays;
+                    widget.salonData.openingTime = _formatTime(_openingTime);
+                    widget.salonData.closingTime = _formatTime(_closingTime);
 
                     Navigator.push(
                       context,

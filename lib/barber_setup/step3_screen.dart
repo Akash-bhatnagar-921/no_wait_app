@@ -1,8 +1,7 @@
 import 'package:flutter/material.dart';
-import 'package:no_wait_app/home_screen.dart';
 import 'models/salon_onboarding_model.dart';
 import 'package:no_wait_app/services/api_service.dart';
-import 'package:no_wait_app/barber_setup/barber_home_screen.dart';
+import 'package:no_wait_app/barber_setup/waiting_screen.dart';
 
 class Step3Screen extends StatefulWidget {
   final SalonOnboardingModel salonData;
@@ -14,6 +13,8 @@ class Step3Screen extends StatefulWidget {
 }
 
 class _Step3ScreenState extends State<Step3Screen> {
+  bool _isLoading = false;
+
   @override
   void initState() {
     super.initState();
@@ -67,7 +68,7 @@ class _Step3ScreenState extends State<Step3Screen> {
           const SizedBox(height: 25),
 
           /// 🔥 STEP INDICATOR
-          _mobileStepIndicator(1),
+          _mobileStepIndicator(3),
 
           const SizedBox(height: 25),
 
@@ -135,11 +136,11 @@ class _Step3ScreenState extends State<Step3Screen> {
                     child: Column(
                       mainAxisAlignment: MainAxisAlignment.center,
                       children: [
-                        _stepItem("1", "Salon Details", true),
+                        _stepItem("1", "Salon Details", false),
                         const SizedBox(height: 55),
                         _stepItem("2", "Services", false),
                         const SizedBox(height: 55),
-                        _stepItem("3", "Barbers", false),
+                        _stepItem("3", "Barbers", true),
                       ],
                     ),
                   ),
@@ -264,39 +265,57 @@ class _Step3ScreenState extends State<Step3Screen> {
                       borderRadius: BorderRadius.circular(12),
                     ),
                   ),
-                  onPressed: () async {
-                    widget.salonData.barbers = barbers;
+                  onPressed: _isLoading
+                      ? null
+                      : () async {
+                          widget.salonData.barbers = barbers;
 
-                    try {
-                      print("CALLING CREATE SALON API");
-                      print(widget.salonData.barbers);
+                          setState(() => _isLoading = true);
 
-                      final res = await ApiService.createSalon(
-                        salonData: widget.salonData,
-                      );
+                          final messenger = ScaffoldMessenger.of(context);
+                          final navigator = Navigator.of(context);
 
-                      print(res);
+                          try {
+                            final res = await ApiService.createSalon(
+                              salonData: widget.salonData,
+                            );
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(content: Text("Salon Created ✅")),
-                      );
+                            // Save the JWT issued for the new professional
+                            if (res['access_token'] != null) {
+                              await ApiService.saveToken(
+                                  res['access_token'] as String);
+                            }
 
-                      Navigator.pushAndRemoveUntil(
-                        context,
-                        MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen()),
-                        (route) => false,
-                      );
-                    } catch (e) {
-                      print(e);
+                            final createdAt = DateTime.parse(
+                                res['createdAt'] as String? ??
+                                    DateTime.now().toIso8601String());
 
-                      ScaffoldMessenger.of(context).showSnackBar(
-                        const SnackBar(
-                          content: Text("Failed to create salon ❌"),
-                        ),
-                      );
-                    }
-                  },
-                  child: const Text("Finish"),
+                            navigator.pushAndRemoveUntil(
+                              MaterialPageRoute(
+                                  builder: (_) =>
+                                      WaitingScreen(submittedAt: createdAt)),
+                              (route) => false,
+                            );
+                          } catch (e) {
+                            messenger.showSnackBar(
+                              SnackBar(
+                                content: Text("Failed to create salon: $e"),
+                              ),
+                            );
+                          } finally {
+                            if (mounted) setState(() => _isLoading = false);
+                          }
+                        },
+                  child: _isLoading
+                      ? const SizedBox(
+                          height: 20,
+                          width: 20,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2,
+                          ),
+                        )
+                      : const Text("Finish"),
                 ),
               ),
             ),

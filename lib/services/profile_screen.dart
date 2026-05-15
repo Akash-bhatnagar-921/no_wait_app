@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import '../models/user_profile_model.dart';
 import 'package:no_wait_app/services/api_service.dart';
+import 'package:no_wait_app/widgets/loading_widget.dart';
 import 'package:intl/intl.dart';
 
 class ProfileScreen extends StatefulWidget {
@@ -12,103 +13,98 @@ class ProfileScreen extends StatefulWidget {
 
 class _ProfileScreenState extends State<ProfileScreen> {
   UserProfileModel? user;
-
   bool isLoading = true;
-
-  Future<void> fetchProfile() async {
-    try {
-      print("callig Get Profile API");
-      final res = await ApiService.getProfile();
-
-      if (res == null) {
-        print("TOKEN NULL");
-        setState(() {
-          isLoading = false;
-        });
-
-        return;
-      }
-
-      setState(() {
-        user = res;
-        isLoading = false;
-      });
-      print("APi finished");
-    } catch (e) {
-      print(e);
-
-      setState(() {
-        isLoading = false;
-      });
-    }
-  }
 
   @override
   void initState() {
     super.initState();
-
-    fetchProfile();
+    _fetchProfile();
   }
+
+  Future<void> _fetchProfile() async {
+    try {
+      final res = await ApiService.getProfile();
+      if (mounted) {
+        setState(() {
+          user = res;
+          isLoading = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => isLoading = false);
+    }
+  }
+
+  // ── Shortcuts ──────────────────────────────────────────────────────────────
+  ColorScheme get _cs => Theme.of(context).colorScheme;
+  Color get _primary => _cs.primary;
+  Color get _onSurface => _cs.onSurface;
+  Color get _surface => _cs.surface;
+  Color get _subtleText => _cs.onSurface.withValues(alpha: 0.55);
+
+  // ── Build ──────────────────────────────────────────────────────────────────
 
   @override
   Widget build(BuildContext context) {
     if (isLoading) {
-      return const Scaffold(body: Center(child: CircularProgressIndicator()));
+      return const Scaffold(
+        body: AppLoadingIndicator(message: 'Loading profile…'),
+      );
     }
-    String formattedDate = user?.createdAt != null
-        ? DateFormat("dd MMM yyyy").format(DateTime.parse(user!.createdAt!))
-        : "No date";
+
+    final formattedDate = user?.createdAt != null
+        ? DateFormat('MMMM yyyy').format(DateTime.parse(user!.createdAt!))
+        : '—';
+
     return Scaffold(
-      backgroundColor: Colors.white,
-
       appBar: AppBar(
-        backgroundColor: Colors.white,
-        elevation: 0,
-
         centerTitle: true,
-        title: const Text(
-          "My Profile",
-          style: TextStyle(color: Colors.black, fontWeight: FontWeight.bold),
-        ),
+        title: const Text('My Profile'),
       ),
-
       body: SingleChildScrollView(
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
-            /// TOP CARD
+            // ── Hero card ────────────────────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(18),
               decoration: BoxDecoration(
-                color: const Color(0xFFF5FAF7),
+                color: _primary.withValues(alpha: 0.07),
                 borderRadius: BorderRadius.circular(20),
               ),
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  /// DEFAULT ICON
+                  // Avatar
                   Container(
                     height: 85,
                     width: 85,
                     decoration: BoxDecoration(
-                      color: Colors.green.shade100,
+                      color: _primary.withValues(alpha: 0.15),
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(
-                      Icons.person,
-                      size: 50,
-                      color: Color(0xFF1B8A4B),
+                    child: Center(
+                      child: user?.fullName.isNotEmpty == true
+                          ? Text(
+                              user!.fullName[0].toUpperCase(),
+                              style: TextStyle(
+                                fontSize: 34,
+                                fontWeight: FontWeight.bold,
+                                color: _primary,
+                              ),
+                            )
+                          : Icon(Icons.person, size: 40, color: _primary),
                     ),
                   ),
 
                   const SizedBox(width: 18),
 
-                  /// RIGHT SECTION
+                  // Details
                   Expanded(
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        /// NAME + EDIT
+                        // Name + edit
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
@@ -116,30 +112,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
                               child: Text(
                                 user?.fullName ?? '',
                                 style: TextStyle(
-                                  fontSize: 24,
+                                  fontSize: 22,
                                   fontWeight: FontWeight.bold,
-                                  color: Color(0xFF0B3B2E),
+                                  color: _onSurface,
                                 ),
                               ),
                             ),
-
                             GestureDetector(
-                              onTap: () {
-                                showEditNameDialog(context);
-                              },
+                              onTap: () => _showEditNameDialog(context),
                               child: Container(
                                 padding: const EdgeInsets.all(6),
                                 decoration: BoxDecoration(
-                                  border: Border.all(
-                                    color: const Color(0xFF34A853),
-                                  ),
+                                  border: Border.all(color: _primary),
                                   borderRadius: BorderRadius.circular(10),
                                 ),
-                                child: const Icon(
-                                  Icons.edit,
-                                  size: 18,
-                                  color: Color(0xFF34A853),
-                                ),
+                                child: Icon(Icons.edit,
+                                    size: 18, color: _primary),
                               ),
                             ),
                           ],
@@ -147,62 +135,29 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                         const SizedBox(height: 10),
 
-                        /// ROLE
+                        // Role badge
                         Container(
                           padding: const EdgeInsets.symmetric(
-                            horizontal: 12,
-                            vertical: 6,
-                          ),
+                              horizontal: 12, vertical: 6),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFE1F5E8),
+                            color: _primary.withValues(alpha: 0.12),
                             borderRadius: BorderRadius.circular(20),
                           ),
                           child: Text(
                             user?.role ?? '',
                             style: TextStyle(
-                              color: Color(0xFF1B8A4B),
+                              color: _primary,
                               fontWeight: FontWeight.w600,
+                              fontSize: 13,
                             ),
                           ),
                         ),
 
-                        const SizedBox(height: 18),
+                        const SizedBox(height: 16),
 
-                        /// PHONE
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.call_outlined,
-                              size: 20,
-                              color: Colors.black54,
-                            ),
-                            SizedBox(width: 10),
-                            Text(
-                              user?.phone ?? '',
-                              style: TextStyle(fontSize: 16),
-                            ),
-                          ],
-                        ),
-
-                        const SizedBox(height: 12),
-
-                        /// EMAIL
-                        Row(
-                          children: [
-                            Icon(
-                              Icons.mail_outline,
-                              size: 20,
-                              color: Colors.black54,
-                            ),
-                            SizedBox(width: 10),
-                            Expanded(
-                              child: Text(
-                                user?.email ?? '',
-                                style: TextStyle(fontSize: 16),
-                              ),
-                            ),
-                          ],
-                        ),
+                        _contactRow(Icons.call_outlined, user?.phone ?? ''),
+                        const SizedBox(height: 10),
+                        _contactRow(Icons.mail_outline, user?.email ?? ''),
                       ],
                     ),
                   ),
@@ -212,92 +167,96 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
             const SizedBox(height: 24),
 
-            /// PERSONAL INFO CARD
-            profileCard(
-              title: "Personal Information",
+            // ── Personal info ─────────────────────────────────────────────────
+            _profileCard(
+              title: 'Personal Information',
               children: [
-                profileTile(
-                  Icons.person_outline,
-                  "Full Name",
-                  user?.fullName ?? '',
-                ),
-
-                profileTile(
-                  Icons.call_outlined,
-                  "Phone Number",
-                  user?.phone ?? '',
-                ),
-
-                profileTile(
-                  Icons.mail_outline,
-                  "Email Address",
-                  user?.email ?? '',
-                ),
-
-                // String createdAt = "2026-05-05T17:18:33.410Z";
-                profileTile(
-                  Icons.calendar_today_outlined,
-                  "Member Since",
-                  formattedDate,
-                  isLast: true,
-                ),
+                _profileTile(Icons.person_outline, 'Full Name',
+                    user?.fullName ?? ''),
+                _profileTile(Icons.call_outlined, 'Phone Number',
+                    user?.phone ?? ''),
+                _profileTile(Icons.mail_outline, 'Email Address',
+                    user?.email ?? ''),
+                _profileTile(
+                    Icons.calendar_today_outlined, 'Member Since',
+                    formattedDate,
+                    isLast: true),
               ],
             ),
 
             const SizedBox(height: 20),
 
-            /// ACCOUNT CARD
-            profileCard(
-              title: "Account",
+            // ── Account ────────────────────────────────────────────────────────
+            _profileCard(
+              title: 'Account',
               children: [
-                settingsTile(Icons.lock_outline, "Change Password"),
-
-                settingsTile(
+                _navTile(Icons.lock_outline, 'Change Password',
+                    onTap: () {}),
+                _navTile(
                   Icons.logout,
-                  "Logout",
+                  'Logout',
                   color: Colors.red,
                   isLast: true,
+                  onTap: () {},
                 ),
               ],
             ),
 
             const SizedBox(height: 24),
 
-            /// SECURITY BOX
+            // ── Security note ─────────────────────────────────────────────────
             Container(
               width: double.infinity,
-              padding: const EdgeInsets.all(18),
+              padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
-                color: const Color(0xFFF3FBF5),
-                borderRadius: BorderRadius.circular(16),
-                border: Border.all(color: Colors.green.shade100),
+                color: _primary.withValues(alpha: 0.06),
+                borderRadius: BorderRadius.circular(14),
+                border:
+                    Border.all(color: _primary.withValues(alpha: 0.25)),
               ),
-              child: const Row(
+              child: Row(
                 children: [
-                  Icon(Icons.verified_user_outlined, color: Color(0xFF1B8A4B)),
-
-                  SizedBox(width: 12),
-
+                  Icon(Icons.verified_user_outlined,
+                      color: _primary, size: 22),
+                  const SizedBox(width: 12),
                   Expanded(
                     child: Text(
-                      "Your data is safe and secure with us.",
+                      'Your data is safe and secure with us.',
                       style: TextStyle(
-                        color: Color(0xFF1B8A4B),
-                        fontWeight: FontWeight.w500,
-                      ),
+                          color: _primary, fontWeight: FontWeight.w500),
                     ),
                   ),
                 ],
               ),
             ),
+
+            const SizedBox(height: 24),
           ],
         ),
       ),
     );
   }
 
-  /// CARD
-  static Widget profileCard({
+  // ── Small helpers ──────────────────────────────────────────────────────────
+
+  Widget _contactRow(IconData icon, String text) {
+    return Row(
+      children: [
+        Icon(icon, size: 18, color: _subtleText),
+        const SizedBox(width: 8),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(fontSize: 15, color: _onSurface),
+          ),
+        ),
+      ],
+    );
+  }
+
+  // ── Card & tile builders ───────────────────────────────────────────────────
+
+  Widget _profileCard({
     required String title,
     required List<Widget> children,
   }) {
@@ -305,149 +264,165 @@ class _ProfileScreenState extends State<ProfileScreen> {
       width: double.infinity,
       padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
-        color: Colors.white,
+        color: _surface,
         borderRadius: BorderRadius.circular(22),
-        border: Border.all(color: Colors.grey.shade200),
+        border: Border.all(
+            color: _onSurface.withValues(alpha: 0.1)),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Text(
             title,
-            style: const TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+            style: TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                color: _onSurface),
           ),
-
-          const SizedBox(height: 20),
-
+          const SizedBox(height: 18),
           ...children,
         ],
       ),
     );
   }
 
-  /// PROFILE TILE
-  static Widget profileTile(
+  Widget _profileTile(
     IconData icon,
-    String title,
+    String label,
     String value, {
     bool isLast = false,
   }) {
     return Container(
-      padding: const EdgeInsets.symmetric(vertical: 18),
+      padding: const EdgeInsets.symmetric(vertical: 14),
       decoration: BoxDecoration(
         border: isLast
             ? null
-            : Border(bottom: BorderSide(color: Colors.grey.shade200)),
+            : Border(
+                bottom: BorderSide(
+                    color: _onSurface.withValues(alpha: 0.08))),
       ),
       child: Row(
         children: [
-          Icon(icon, color: Colors.black54),
-
-          const SizedBox(width: 16),
-
-          Expanded(child: Text(title, style: const TextStyle(fontSize: 17))),
-
+          Icon(icon, color: _subtleText, size: 20),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(label,
+                style: TextStyle(fontSize: 15, color: _onSurface)),
+          ),
           Text(
             value,
-            style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w500),
+            style: TextStyle(
+                fontSize: 15,
+                fontWeight: FontWeight.w600,
+                color: _onSurface),
           ),
         ],
       ),
     );
   }
 
-  /// SETTINGS TILE
-  static Widget settingsTile(
+  Widget _navTile(
     IconData icon,
     String title, {
-    Color color = Colors.black,
+    Color? color,
     bool isLast = false,
+    VoidCallback? onTap,
   }) {
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 18),
-      decoration: BoxDecoration(
-        border: isLast
-            ? null
-            : Border(bottom: BorderSide(color: Colors.grey.shade200)),
-      ),
-      child: Row(
-        children: [
-          Icon(icon, color: color),
-
-          const SizedBox(width: 16),
-
-          Expanded(
-            child: Text(title, style: TextStyle(fontSize: 17, color: color)),
-          ),
-
-          Icon(Icons.chevron_right, color: color),
-        ],
+    final c = color ?? _onSurface;
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          border: isLast
+              ? null
+              : Border(
+                  bottom: BorderSide(
+                      color: _onSurface.withValues(alpha: 0.08))),
+        ),
+        child: Row(
+          children: [
+            Icon(icon, color: c, size: 20),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(title,
+                  style: TextStyle(fontSize: 15, color: c)),
+            ),
+            Icon(Icons.chevron_right,
+                color: c.withValues(alpha: 0.5), size: 20),
+          ],
+        ),
       ),
     );
   }
 
-  /// EDIT NAME DIALOG
-  static void showEditNameDialog(BuildContext context) {
-    final controller = TextEditingController(text: "Rohit Sharma");
+  // ── Edit name dialog ───────────────────────────────────────────────────────
+
+  void _showEditNameDialog(BuildContext ctx) {
+    final primary = Theme.of(ctx).colorScheme.primary;
+    final controller =
+        TextEditingController(text: user?.fullName ?? '');
 
     showModalBottomSheet(
-      context: context,
+      context: ctx,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) {
-        return Container(
-          padding: const EdgeInsets.all(24),
-          decoration: const BoxDecoration(
-            color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(28)),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Update Name",
-                style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
-              ),
-
-              const SizedBox(height: 24),
-
-              TextField(
-                controller: controller,
-                decoration: InputDecoration(
-                  hintText: "Enter new name",
-                  filled: true,
-                  fillColor: Colors.grey.shade100,
-                  border: OutlineInputBorder(
-                    borderRadius: BorderRadius.circular(16),
-                    borderSide: BorderSide.none,
+        return Padding(
+          padding: EdgeInsets.only(
+              bottom: MediaQuery.of(ctx).viewInsets.bottom),
+          child: Container(
+            padding: const EdgeInsets.all(24),
+            decoration: const BoxDecoration(
+              color: Colors.white,
+              borderRadius:
+                  BorderRadius.vertical(top: Radius.circular(28)),
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 40,
+                  height: 4,
+                  margin: const EdgeInsets.only(bottom: 20),
+                  decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2),
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 24),
-
-              SizedBox(
-                width: double.infinity,
-                height: 55,
-                child: ElevatedButton(
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: const Color(0xFF34A853),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(16),
+                Text(
+                  'Update Name',
+                  style: TextStyle(
+                      fontSize: 20,
+                      fontWeight: FontWeight.bold,
+                      color: primary),
+                ),
+                const SizedBox(height: 20),
+                TextField(
+                  controller: controller,
+                  decoration: InputDecoration(
+                    hintText: 'Enter new name',
+                    filled: true,
+                    fillColor: Colors.grey.shade100,
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(14),
+                      borderSide: BorderSide.none,
                     ),
                   ),
-                  onPressed: () {
-                    Navigator.pop(context);
-                  },
-                  child: const Text(
-                    "Save Changes",
-                    style: TextStyle(fontSize: 16),
+                ),
+                const SizedBox(height: 20),
+                SizedBox(
+                  width: double.infinity,
+                  height: 52,
+                  child: ElevatedButton(
+                    onPressed: () => Navigator.pop(ctx),
+                    child: const Text('Save Changes',
+                        style: TextStyle(fontSize: 16)),
                   ),
                 ),
-              ),
-
-              const SizedBox(height: 10),
-            ],
+                const SizedBox(height: 10),
+              ],
+            ),
           ),
         );
       },

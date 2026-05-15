@@ -3,7 +3,11 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'home_screen.dart';
 import 'package:no_wait_app/services/api_service.dart';
+import 'package:no_wait_app/barber_setup/barber_home_screen.dart';
+import 'package:no_wait_app/barber_setup/waiting_screen.dart';
 import '../widgets/loading_widget.dart';
+import '../widgets/app_snackbar.dart';
+import '../theme/theme_manager.dart';
 
 class OtpScreen extends StatefulWidget {
   final String phone;
@@ -11,12 +15,17 @@ class OtpScreen extends StatefulWidget {
   final int resendRemaining;
   final int expiresInSeconds;
 
+  /// 'professional' | 'customer' — set at Send-OTP time so the screen
+  /// can show the salon secret-code field immediately for professionals.
+  final String role;
+
   const OtpScreen({
     super.key,
     required this.phone,
     required this.email,
     required this.resendRemaining,
     required this.expiresInSeconds,
+    this.role = 'customer',
   });
 
   @override
@@ -24,10 +33,11 @@ class OtpScreen extends StatefulWidget {
 }
 
 class _OtpScreenState extends State<OtpScreen> {
-  final List<TextEditingController> controllers = List.generate(
-    6,
-    (_) => TextEditingController(),
-  );
+  final List<TextEditingController> controllers =
+      List.generate(6, (_) => TextEditingController());
+
+  final TextEditingController _secretCodeController = TextEditingController();
+  bool _secretObscure = true;
 
   Timer? otpTimer;
   Timer? resendBlockTimer;
@@ -35,6 +45,8 @@ class _OtpScreenState extends State<OtpScreen> {
   late int resendRemaining;
   int resendBlockedSeconds = 0;
   late String maskedEmail;
+
+  bool get _isProfessional => widget.role == 'professional';
 
   @override
   void initState() {
@@ -49,16 +61,16 @@ class _OtpScreenState extends State<OtpScreen> {
   void dispose() {
     otpTimer?.cancel();
     resendBlockTimer?.cancel();
-    for (final controller in controllers) {
-      controller.dispose();
+    for (final c in controllers) {
+      c.dispose();
     }
+    _secretCodeController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    final size = MediaQuery.of(context).size;
-    final isTablet = size.shortestSide >= 600;
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
 
     return Scaffold(
       backgroundColor: Colors.white,
@@ -66,9 +78,8 @@ class _OtpScreenState extends State<OtpScreen> {
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: isTablet ? 800 : double.infinity,
-            ),
+            constraints:
+                BoxConstraints(maxWidth: isTablet ? 800 : double.infinity),
             child: isTablet ? _tabletLayout(context) : _mobileLayout(context),
           ),
         ),
@@ -76,7 +87,6 @@ class _OtpScreenState extends State<OtpScreen> {
     );
   }
 
-  /// ðŸ“± MOBILE
   Widget _mobileLayout(BuildContext context) {
     return SingleChildScrollView(
       padding: const EdgeInsets.all(16),
@@ -86,7 +96,6 @@ class _OtpScreenState extends State<OtpScreen> {
     );
   }
 
-  /// ðŸ“Ÿ TABLET / DESKTOP
   Widget _tabletLayout(BuildContext context) {
     return Row(
       children: [
@@ -105,7 +114,6 @@ class _OtpScreenState extends State<OtpScreen> {
     );
   }
 
-  /// ðŸ–¼ IMAGE
   Widget _image() {
     return ClipRRect(
       borderRadius: BorderRadius.circular(16),
@@ -116,7 +124,6 @@ class _OtpScreenState extends State<OtpScreen> {
     );
   }
 
-  /// ðŸ”¥ CONTENT
   Widget _content(BuildContext context) {
     final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
 
@@ -125,17 +132,33 @@ class _OtpScreenState extends State<OtpScreen> {
       children: [
         const SizedBox(height: 10),
 
-        /// ICONS
+        // ── Step badge for professionals ──────────────────────────────────
+        if (_isProfessional)
+          Container(
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+            decoration: BoxDecoration(
+              color: const Color(0xFF6FCF97).withValues(alpha: 0.12),
+              borderRadius: BorderRadius.circular(20),
+            ),
+            child: const Text(
+              "Professional Login — 2-Step Verification",
+              style: TextStyle(
+                  color: Color(0xFF2D9248),
+                  fontSize: 12,
+                  fontWeight: FontWeight.w600),
+            ),
+          ),
+
+        const SizedBox(height: 14),
+
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: const [
             Icon(Icons.content_cut, size: 24),
             SizedBox(width: 10),
-            Icon(
-              Icons.face_retouching_natural,
-              size: 24,
-              color: Color(0xFF6FCF97),
-            ),
+            Icon(Icons.face_retouching_natural,
+                size: 24, color: Color(0xFF6FCF97)),
             SizedBox(width: 10),
             Icon(Icons.air, size: 24),
           ],
@@ -143,92 +166,81 @@ class _OtpScreenState extends State<OtpScreen> {
 
         const SizedBox(height: 20),
 
-        const Text(
-          "Verify OTP",
-          style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
+        Text(
+          _isProfessional ? "Step 1 — Verify OTP" : "Verify OTP",
+          style: const TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
         ),
 
         const SizedBox(height: 8),
 
         Text(
           maskedEmail.isEmpty
-              ? "Enter the code sent to your registered email"
+              ? (_isProfessional
+                  ? "Contact Baari admin for your OTP code"
+                  : "Enter the code sent to your registered email")
               : "Enter the code sent to $maskedEmail",
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.grey),
         ),
 
-        const SizedBox(height: 8),
+        const SizedBox(height: 6),
 
         Text(
           "Expires in ${_formatDuration(otpSecondsRemaining)}",
           style: const TextStyle(color: Colors.grey, fontSize: 12),
         ),
 
-        const SizedBox(height: 30),
+        const SizedBox(height: 28),
 
-        /// ðŸ”¥ OTP BOXES (FIXED RESPONSIVE WIDTH)
-        LayoutBuilder(
-          builder: (context, constraints) {
-            const spacing = 6.0;
+        // ── OTP boxes ─────────────────────────────────────────────────────
+        LayoutBuilder(builder: (context, constraints) {
+          const spacing = 6.0;
+          const minBoxSize = 34.0;
+          const maxBoxSize = 55.0;
+          final rawSize = (constraints.maxWidth - (spacing * 5)) / 6;
+          final boxSize = rawSize.clamp(minBoxSize, maxBoxSize);
 
-            // ðŸ”¥ SAFE AVAILABLE WIDTH (extra buffer removed)
-            final maxWidth = constraints.maxWidth;
-
-            // minimum usable size for OTP box
-            const minBoxSize = 34.0;
-            const maxBoxSize = 55.0;
-
-            // calculate raw size
-            final rawSize = (maxWidth - (spacing * 5)) / 6;
-
-            // clamp to safe range
-            final boxSize = rawSize.clamp(minBoxSize, maxBoxSize);
-
-            return FittedBox(
-              fit: BoxFit.scaleDown, // ðŸ”¥ IMPORTANT FIX
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: List.generate(6, (index) {
-                  return Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: spacing / 2,
-                    ),
-                    child: SizedBox(
-                      width: boxSize,
-                      height: boxSize,
-                      child: TextField(
-                        controller: controllers[index],
-                        textAlign: TextAlign.center,
-                        keyboardType: TextInputType.number,
-                        maxLength: 1,
-                        style: TextStyle(
-                          fontSize: boxSize * 0.5,
-                          fontWeight: FontWeight.bold,
-                        ),
-                        decoration: InputDecoration(
-                          counterText: "",
-                          isDense: true,
-                          contentPadding: EdgeInsets.zero,
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(10),
-                          ),
-                        ),
-                        onChanged: (value) {
-                          if (value.isNotEmpty && index < 5) {
-                            FocusScope.of(context).nextFocus();
-                          }
-                        },
+          return FittedBox(
+            fit: BoxFit.scaleDown,
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: List.generate(6, (index) {
+                return Padding(
+                  padding:
+                      const EdgeInsets.symmetric(horizontal: spacing / 2),
+                  child: SizedBox(
+                    width: boxSize,
+                    height: boxSize,
+                    child: TextField(
+                      controller: controllers[index],
+                      textAlign: TextAlign.center,
+                      keyboardType: TextInputType.number,
+                      maxLength: 1,
+                      style: TextStyle(
+                        fontSize: boxSize * 0.5,
+                        fontWeight: FontWeight.bold,
                       ),
+                      decoration: InputDecoration(
+                        counterText: "",
+                        isDense: true,
+                        contentPadding: EdgeInsets.zero,
+                        border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onChanged: (value) {
+                        if (value.isNotEmpty && index < 5) {
+                          FocusScope.of(context).nextFocus();
+                        }
+                      },
                     ),
-                  );
-                }),
-              ),
-            );
-          },
-        ),
+                  ),
+                );
+              }),
+            ),
+          );
+        }),
 
-        const SizedBox(height: 20),
+        const SizedBox(height: 16),
 
         TextButton(
           onPressed: resendBlockedSeconds > 0 ? null : _resendOtp,
@@ -246,9 +258,63 @@ class _OtpScreenState extends State<OtpScreen> {
             style: const TextStyle(color: Colors.grey, fontSize: 12),
           ),
 
-        const SizedBox(height: 30),
+        // ── Step 2: Salon Secret Code (professionals only) ─────────────────
+        if (_isProfessional) ...[
+          const SizedBox(height: 28),
+          Row(
+            children: const [
+              Expanded(child: Divider()),
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  "Step 2 — Salon Secret Code",
+                  style: TextStyle(
+                      color: Color(0xFF2D9248),
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600),
+                ),
+              ),
+              Expanded(child: Divider()),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            "Enter the non-expiry code sent to your email when your salon was approved.",
+            textAlign: TextAlign.center,
+            style: TextStyle(color: Colors.grey, fontSize: 12, height: 1.4),
+          ),
+          const SizedBox(height: 12),
+          TextField(
+            controller: _secretCodeController,
+            keyboardType: TextInputType.number,
+            obscureText: _secretObscure,
+            style: const TextStyle(
+                fontSize: 20, fontWeight: FontWeight.bold, letterSpacing: 4),
+            textAlign: TextAlign.center,
+            decoration: InputDecoration(
+              hintText: "••••••••••",
+              hintStyle: const TextStyle(letterSpacing: 4),
+              filled: true,
+              fillColor: Colors.grey.shade100,
+              border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(14),
+                borderSide: BorderSide.none,
+              ),
+              suffixIcon: IconButton(
+                icon: Icon(
+                  _secretObscure ? Icons.visibility_off : Icons.visibility,
+                  color: Colors.grey,
+                ),
+                onPressed: () =>
+                    setState(() => _secretObscure = !_secretObscure),
+              ),
+            ),
+          ),
+        ],
 
-        /// ðŸ”¥ BUTTON
+        const SizedBox(height: 28),
+
+        // ── Verify button ─────────────────────────────────────────────────
         SizedBox(
           width: double.infinity,
           height: isTablet ? 60 : 55,
@@ -256,11 +322,13 @@ class _OtpScreenState extends State<OtpScreen> {
             style: ElevatedButton.styleFrom(
               backgroundColor: const Color(0xFF6FCF97),
               shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(14),
-              ),
+                  borderRadius: BorderRadius.circular(14)),
             ),
             onPressed: _verifyOtp,
-            child: const Text("Verify & Login", style: TextStyle(fontSize: 16)),
+            child: Text(
+              _isProfessional ? "Verify & Enter Dashboard" : "Verify & Login",
+              style: const TextStyle(fontSize: 16),
+            ),
           ),
         ),
 
@@ -271,20 +339,25 @@ class _OtpScreenState extends State<OtpScreen> {
           child: const Text(
             "Back",
             style: TextStyle(
-              color: Color(0xFF6FCF97),
-              fontWeight: FontWeight.bold,
-            ),
+                color: Color(0xFF6FCF97), fontWeight: FontWeight.bold),
           ),
         ),
       ],
     );
   }
 
+  // ── Verify ─────────────────────────────────────────────────────────────────
+
   Future<void> _verifyOtp() async {
-    final otp = controllers.map((controller) => controller.text).join();
+    final otp = controllers.map((c) => c.text).join();
 
     if (otp.length != 6) {
-      _showSnack("Please enter the 6 digit OTP");
+      AppSnackbar.warning(context, 'Please enter the 6-digit OTP');
+      return;
+    }
+
+    if (_isProfessional && _secretCodeController.text.trim().isEmpty) {
+      AppSnackbar.warning(context, 'Please enter your salon secret code (Step 2)');
       return;
     }
 
@@ -293,42 +366,102 @@ class _OtpScreenState extends State<OtpScreen> {
     showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => const LoadingWidget(),
+      builder: (_) => const LoadingWidget(message: 'Verifying…'),
     );
 
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+
     try {
+      // Step 1 — verify OTP
       final res = await ApiService.verifyLoginOtp(
         phone: widget.phone,
         otp: otp,
       );
 
-      await ApiService.saveToken(res['access_token']);
+      await ApiService.saveToken(res['access_token'] as String);
 
+      final userMap = res['user'] as Map<String, dynamic>?;
+      final confirmedRole = userMap?['role']?.toString() ?? '';
+
+      // Auto-apply gender theme immediately after login
+      await ThemeManager.instance
+          .setThemeFromGender(userMap?['gender'] as String?);
+
+      if (confirmedRole == 'professional') {
+        // Check salon approval status
+        final salons = await ApiService.getMySalons();
+        navigator.pop(); // dismiss loader
+
+        if (!mounted) return;
+
+        final pending = salons.firstWhere(
+          (s) => s['status'] == 'pending',
+          orElse: () => null,
+        );
+
+        if (pending != null) {
+          final createdAt = DateTime.parse(
+            pending['createdAt'] as String? ??
+                DateTime.now().toIso8601String(),
+          );
+          navigator.pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => WaitingScreen(submittedAt: createdAt),
+            ),
+          );
+          return;
+        }
+
+        final approved = salons.firstWhere(
+          (s) => s['status'] == 'approved',
+          orElse: () => null,
+        );
+
+        if (approved == null) {
+          AppSnackbar.infoM(messenger,
+              'No salon found. Please contact Baari support.');
+          return;
+        }
+
+        // Step 2 — verify salon secret code
+        try {
+          await ApiService.verifySalonCode(
+            phone: widget.phone,
+            code: _secretCodeController.text.trim(),
+          );
+        } on ApiException catch (e) {
+          AppSnackbar.errorM(messenger, e.message);
+          return;
+        }
+
+        if (!mounted) return;
+        navigator.pushReplacement(
+          MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen()),
+        );
+        return;
+      }
+
+      // Customer → home
+      navigator.pop(); // dismiss loader
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
 
-      Navigator.pushReplacement(
-        context,
+      navigator.pushReplacement(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
       );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("Login successful"),
-          backgroundColor: Colors.green,
-          behavior: SnackBarBehavior.floating,
-        ),
-      );
+      AppSnackbar.successM(messenger, 'Login successful!');
     } catch (e) {
       if (!mounted) return;
-      Navigator.of(context, rootNavigator: true).pop();
-
-      final message = e is ApiException ? e.message : "Login failed";
-      _showSnack(message);
+      navigator.pop(); // dismiss loader (safety)
+      final message = e is ApiException ? e.message : 'Login failed';
+      AppSnackbar.error(context, message);
     }
   }
 
+  // ── Resend OTP ──────────────────────────────────────────────────────────────
+
   Future<void> _resendOtp() async {
+    final messenger = ScaffoldMessenger.of(context);
     try {
       final res = await ApiService.requestLoginOtp(phone: widget.phone);
 
@@ -340,46 +473,38 @@ class _OtpScreenState extends State<OtpScreen> {
         resendRemaining = res['resendRemaining'] as int? ?? resendRemaining;
       });
 
-      _showSnack("New OTP sent");
+      AppSnackbar.successM(messenger, 'New OTP sent');
     } catch (e) {
       if (e is ApiException && e.statusCode == 429) {
         final blockedUntil = DateTime.tryParse(
           e.body?['blockedUntil']?.toString() ?? '',
         );
-
-        if (blockedUntil != null) {
-          _startResendBlockTimer(blockedUntil);
-        }
+        if (blockedUntil != null) _startResendBlockTimer(blockedUntil);
       }
-
-      final message = e is ApiException
-          ? e.message
-          : "Failed to resend OTP";
-      _showSnack(message);
+      final message =
+          e is ApiException ? e.message : 'Failed to resend OTP';
+      AppSnackbar.errorM(messenger, message);
     }
   }
 
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
   void _clearOtp() {
-    for (final controller in controllers) {
-      controller.clear();
+    for (final c in controllers) {
+      c.clear();
     }
   }
 
   void _startOtpTimer(int seconds) {
     otpTimer?.cancel();
-    setState(() {
-      otpSecondsRemaining = seconds;
-    });
+    setState(() => otpSecondsRemaining = seconds);
 
     otpTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (otpSecondsRemaining <= 0) {
         timer.cancel();
         return;
       }
-
-      setState(() {
-        otpSecondsRemaining -= 1;
-      });
+      setState(() => otpSecondsRemaining -= 1);
     });
   }
 
@@ -388,34 +513,21 @@ class _OtpScreenState extends State<OtpScreen> {
 
     void updateRemaining() {
       final remaining = blockedUntil.difference(DateTime.now()).inSeconds;
-      setState(() {
-        resendBlockedSeconds = remaining > 0 ? remaining : 0;
-      });
+      setState(() => resendBlockedSeconds = remaining > 0 ? remaining : 0);
     }
 
     updateRemaining();
     resendBlockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       updateRemaining();
-
-      if (resendBlockedSeconds <= 0) {
-        timer.cancel();
-      }
+      if (resendBlockedSeconds <= 0) timer.cancel();
     });
   }
 
   String _formatDuration(int seconds) {
-    final safeSeconds = seconds < 0 ? 0 : seconds;
-    final minutes = safeSeconds ~/ 60;
-    final remainingSeconds = safeSeconds % 60;
-
-    return "$minutes:${remainingSeconds.toString().padLeft(2, '0')}";
+    final s = seconds < 0 ? 0 : seconds;
+    final m = s ~/ 60;
+    final r = s % 60;
+    return "$m:${r.toString().padLeft(2, '0')}";
   }
 
-  void _showSnack(String message) {
-    if (!mounted) return;
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
-  }
 }

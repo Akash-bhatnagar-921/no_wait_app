@@ -29,7 +29,8 @@ class UserProfileModel {
       role: json['role'] ?? '',
       age: json['age'],
       gender: json['gender'],
-      createdAt: json['createdAt']
+      // Backend serialises the TypeORM @CreateDateColumn property as 'created_at'
+      createdAt: json['created_at'] as String?
     );
   }
 }

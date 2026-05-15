@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'otp_screen.dart';
 import 'package:no_wait_app/services/api_service.dart';
 import 'widgets/loading_widget.dart';
+import 'widgets/app_snackbar.dart';
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -167,9 +168,7 @@ class _LoginScreenState extends State<LoginScreen> {
               final phone = phoneController.text.trim();
 
               if (phone.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Please enter mobile number")),
-                );
+                AppSnackbar.warning(context, 'Please enter your mobile number');
                 return;
               }
 
@@ -177,7 +176,8 @@ class _LoginScreenState extends State<LoginScreen> {
               showDialog(
                 context: context,
                 barrierDismissible: false,
-                builder: (_) => const LoadingWidget(),
+                builder: (_) =>
+                    const LoadingWidget(message: 'Sending OTP…'),
               );
 
               try {
@@ -185,6 +185,8 @@ class _LoginScreenState extends State<LoginScreen> {
 
                 if (!context.mounted) return;
                 Navigator.of(context, rootNavigator: true).pop();
+
+                final role = res['role']?.toString() ?? 'customer';
 
                 Navigator.push(
                   context,
@@ -194,19 +196,16 @@ class _LoginScreenState extends State<LoginScreen> {
                       email: res['email']?.toString() ?? '',
                       resendRemaining: res['resendRemaining'] as int? ?? 3,
                       expiresInSeconds: res['expiresInSeconds'] as int? ?? 300,
+                      role: role,
                     ),
                   ),
                 );
               } catch (e) {
                 if (!context.mounted) return;
                 Navigator.of(context, rootNavigator: true).pop();
-
-                final message = e is ApiException
-                    ? e.message
-                    : "Failed to send OTP";
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(message)),
-                );
+                final message =
+                    e is ApiException ? e.message : 'Failed to send OTP';
+                AppSnackbar.error(context, message);
               }
             },
             child: const Text("Send OTP", style: TextStyle(fontSize: 16)),
