@@ -9,6 +9,7 @@ import '../my_bookings_screen.dart';
 import '../subscriptions_screen.dart';
 import '../privacy_policy_screen.dart';
 import '../settings_screen.dart';
+import '../wishlist_screen.dart';
 
 /// Navigation drawer for the customer side.
 ///
@@ -24,11 +25,13 @@ class AppDrawer extends StatefulWidget {
 class _AppDrawerState extends State<AppDrawer> {
   UserProfileModel? _profile;
   bool _loading = true;
+  int _wishlistCount = 0;
 
   @override
   void initState() {
     super.initState();
     _loadProfile();
+    _loadWishlistCount();
     // Rebuild drawer header when theme changes without re-fetching data
     ThemeManager.instance.addListener(_onThemeChanged);
   }
@@ -46,13 +49,22 @@ class _AppDrawerState extends State<AppDrawer> {
   Future<void> _loadProfile() async {
     try {
       final p = await ApiService.getProfile();
-      if (mounted) setState(() {
-        _profile = p;
-        _loading = false;
-      });
+      if (mounted) {
+        setState(() {
+          _profile = p;
+          _loading = false;
+        });
+      }
     } catch (_) {
-      if (mounted) setState(() => _loading = false);
+      if (mounted) { setState(() => _loading = false); }
     }
+  }
+
+  Future<void> _loadWishlistCount() async {
+    try {
+      final ids = await ApiService.getWishlistIds();
+      if (mounted) setState(() => _wishlistCount = ids.length);
+    } catch (_) {}
   }
 
   @override
@@ -115,6 +127,13 @@ class _AppDrawerState extends State<AppDrawer> {
             Navigator.push(context,
                 MaterialPageRoute(builder: (_) => const MyBookingsScreen()));
           }),
+          _item(context, Icons.favorite_border_rounded, 'Wishlist',
+              badge: _wishlistCount,
+              onTap: () {
+            Navigator.pop(context);
+            Navigator.push(context,
+                MaterialPageRoute(builder: (_) => const WishlistScreen()));
+          }),
           _item(context, Icons.subscriptions_outlined, 'Subscriptions',
               onTap: () {
             Navigator.pop(context);
@@ -139,10 +158,46 @@ class _AppDrawerState extends State<AppDrawer> {
             Icons.logout,
             'Logout',
             onTap: () async {
+              final navigator = Navigator.of(context);
+              final confirmed = await showDialog<bool>(
+                context: context,
+                builder: (ctx) => AlertDialog(
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(20)),
+                  title: const Row(children: [
+                    Icon(Icons.logout, color: Colors.orange, size: 22),
+                    SizedBox(width: 10),
+                    Text('Logout',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                  ]),
+                  content: const Text(
+                      'Are you sure you want to log out of your account?',
+                      style: TextStyle(color: Colors.black54)),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(ctx, false),
+                      child: const Text('Cancel',
+                          style: TextStyle(color: Colors.grey)),
+                    ),
+                    ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.orange.shade700,
+                        foregroundColor: Colors.white,
+                        shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () => Navigator.pop(ctx, true),
+                      child: const Text('Yes, Logout'),
+                    ),
+                    const SizedBox(width: 4),
+                  ],
+                ),
+              );
+              if (confirmed != true) return;
               await ApiService.logout();
-              if (!context.mounted) return;
-              Navigator.pushAndRemoveUntil(
-                context,
+              if (!navigator.mounted) return;
+              Navigator.of(navigator.context, rootNavigator: true)
+                  .pushAndRemoveUntil(
                 MaterialPageRoute(
                     builder: (_) => const RoleSelectionScreen()),
                 (route) => false,
@@ -159,11 +214,28 @@ class _AppDrawerState extends State<AppDrawer> {
     IconData icon,
     String title, {
     VoidCallback? onTap,
+    int badge = 0,
   }) {
     final primary = ThemeManager.instance.primaryColor;
     return ListTile(
       leading: Icon(icon, color: primary),
       title: Text(title),
+      trailing: badge > 0
+          ? Container(
+              padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+              decoration: BoxDecoration(
+                color: primary,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Text(
+                '$badge',
+                style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold),
+              ),
+            )
+          : null,
       onTap: onTap ?? () => Navigator.pop(context),
     );
   }

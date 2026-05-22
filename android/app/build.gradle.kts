@@ -3,6 +3,12 @@ plugins {
     id("kotlin-android")
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id("dev.flutter.flutter-gradle-plugin")
+    // To enable Firebase (FCM) push notifications:
+    //   1. Create a Firebase project at https://console.firebase.google.com
+    //   2. Register your Android app (use the applicationId below)
+    //   3. Download google-services.json → place it in android/app/
+    //   4. Uncomment the next line:
+    // id("com.google.gms.google-services")
 }
 
 android {
@@ -13,6 +19,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        isCoreLibraryDesugaringEnabled = true
     }
 
     kotlinOptions {
@@ -41,4 +48,8 @@ android {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.4")
 }

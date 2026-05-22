@@ -2,11 +2,26 @@ import 'package:flutter/material.dart';
 import 'login_screen.dart';
 import 'signup_screen.dart';
 import 'barber_setup/onboarding_choice_screen.dart';
+import 'barber_setup/barber_home_screen.dart';
+import 'home_screen.dart';
+import 'onboarding_screen.dart';
+import 'services/api_service.dart';
+import 'services/notification_service.dart';
 import 'theme/theme_manager.dart';
+
+/// Root navigator key — allows ApiService to trigger logout from any context.
+final navigatorKey = GlobalKey<NavigatorState>();
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await ThemeManager.instance.loadSavedTheme();
+  ApiService.navigatorKey = navigatorKey;
+
+  // Initialise local notifications (no Firebase dependency).
+  // FCM remote push will be enabled once google-services.json is added —
+  // see notification_service.dart for instructions.
+  await NotificationService.instance.init();
+
   runApp(const MyApp());
 }
 
@@ -36,8 +51,96 @@ class _MyAppState extends State<MyApp> {
   Widget build(BuildContext context) {
     return MaterialApp(
       debugShowCheckedModeBanner: false,
+      navigatorKey: navigatorKey,
       theme: ThemeManager.instance.themeData,
-      home: const RoleSelectionScreen(),
+      home: const _StartupScreen(),
+    );
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Startup screen: checks saved token → routes to correct home, no re-login
+// ─────────────────────────────────────────────────────────────────────────────
+
+class _StartupScreen extends StatefulWidget {
+  const _StartupScreen();
+
+  @override
+  State<_StartupScreen> createState() => _StartupScreenState();
+}
+
+class _StartupScreenState extends State<_StartupScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _checkAuth();
+  }
+
+  Future<void> _checkAuth() async {
+    // Show onboarding on very first launch (before any auth check)
+    final onboardingDone = await isOnboardingDone();
+    if (!onboardingDone) {
+      if (mounted) _goTo(const OnboardingScreen());
+      return;
+    }
+
+    final token = await ApiService.getToken();
+    if (!mounted) return;
+
+    if (token == null) {
+      _goTo(const RoleSelectionScreen());
+      return;
+    }
+
+    // Validate token and get role
+    try {
+      final profile = await ApiService.getProfile();
+      if (!mounted) return;
+      if (profile == null) {
+        _goTo(const RoleSelectionScreen());
+        return;
+      }
+
+      if (profile.role == 'professional') {
+        _goTo(const ProfessionalHomeScreen());
+      } else {
+        _goTo(const HomeScreen());
+      }
+    } catch (_) {
+      // Token invalid/expired — clear it and show login
+      await ApiService.logout();
+      if (mounted) _goTo(const RoleSelectionScreen());
+    }
+  }
+
+  void _goTo(Widget screen) {
+    Navigator.pushReplacement(
+      context,
+      MaterialPageRoute(builder: (_) => screen),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Blank white screen with centered logo while checking auth
+    return Scaffold(
+      backgroundColor: Colors.white,
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Image.asset('assets/logo.png', width: 90, height: 90),
+            const SizedBox(height: 24),
+            SizedBox(
+              width: 24, height: 24,
+              child: CircularProgressIndicator(
+                strokeWidth: 2.5,
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

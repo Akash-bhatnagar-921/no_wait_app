@@ -3,6 +3,8 @@ import 'package:intl/intl.dart';
 
 import 'find_salons_screen.dart';
 import 'map_screen.dart';
+import 'my_bookings_screen.dart';
+import 'services/api_service.dart';
 import 'services/location_prefs.dart';
 import 'widgets/app_drawer.dart';
 import 'widgets/app_snackbar.dart';
@@ -17,6 +19,9 @@ class HomeScreen extends StatefulWidget {
 class _HomeScreenState extends State<HomeScreen> {
   SavedLocation? _location;
   DateTime? _date;
+  Map<String, dynamic>? _activeBooking;
+  int _monthlyBookingCount = 0;
+  String _subscriptionPlan = '';
 
   @override
   void initState() {
@@ -25,9 +30,39 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSaved() async {
-    final loc  = await LocationPrefs.loadLocation();
-    final date = await LocationPrefs.loadDate();
-    if (mounted) setState(() { _location = loc; _date = date; });
+    final results = await Future.wait([
+      LocationPrefs.loadLocation(),
+      LocationPrefs.loadDate(),
+      ApiService.getActiveBooking(),
+      ApiService.getMonthlyBookingCount(),
+      ApiService.getSubscription(),
+    ]);
+
+    final loc           = results[0] as SavedLocation?;
+    final savedDate     = results[1] as DateTime?;
+    final activeBooking = results[2] as Map<String, dynamic>?;
+    final monthlyCount  = results[3] as int;
+    final sub           = results[4] as Map<String, dynamic>;
+    // Use '' (not 'free') as the unknown-plan sentinel so an API failure
+    // never causes the free-plan banner to show for paid users.
+    final plan          = sub['plan']?.toString() ?? '';
+
+    // Discard a saved date that is already in the past
+    final today = DateTime.now();
+    final validDate = (savedDate != null &&
+            !savedDate.isBefore(DateTime(today.year, today.month, today.day)))
+        ? savedDate
+        : null;
+
+    if (mounted) {
+      setState(() {
+        _location            = loc;
+        _date                = validDate;
+        _activeBooking       = activeBooking;
+        _monthlyBookingCount = monthlyCount;
+        _subscriptionPlan    = plan;
+      });
+    }
   }
 
   // ── Location picker ────────────────────────────────────────────────────────
@@ -61,6 +96,13 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Find Salons ────────────────────────────────────────────────────────────
 
   void _findSalons() {
+    if (_activeBooking != null) {
+      AppSnackbar.warning(
+        context,
+        'You already have an upcoming booking. Cancel it first to explore new salons.',
+      );
+      return;
+    }
     if (_location == null) {
       AppSnackbar.warning(context, 'Please select a location first.');
       return;
@@ -126,10 +168,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Widget _mobileLayout() {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.all(16),
-      child: Column(
-        children: [_image(), const SizedBox(height: 20), _content()],
+    return RefreshIndicator(
+      onRefresh: _loadSaved,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          children: [_image(), const SizedBox(height: 20), _content()],
+        ),
       ),
     );
   }
@@ -138,8 +184,14 @@ class _HomeScreenState extends State<HomeScreen> {
     return Row(children: [
       Expanded(flex: 5, child: Padding(
           padding: const EdgeInsets.all(20), child: _image())),
-      Expanded(flex: 5, child: SingleChildScrollView(
-          padding: const EdgeInsets.all(32), child: _content())),
+      Expanded(flex: 5, child: RefreshIndicator(
+        onRefresh: _loadSaved,
+        child: SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.all(32),
+          child: _content(),
+        ),
+      )),
     ]);
   }
 
@@ -194,18 +246,111 @@ class _HomeScreenState extends State<HomeScreen> {
 
         const SizedBox(height: 30),
 
+        // ── Free-plan monthly counter (only shown on free plan) ───────
+        if (_subscriptionPlan == 'free' &&
+            _activeBooking == null &&
+            _monthlyBookingCount > 0)
+          Padding(
+            padding: const EdgeInsets.only(bottom: 12),
+            child: Row(children: [
+              Icon(Icons.info_outline, size: 14,
+                  color: _monthlyBookingCount >= 2
+                      ? Colors.red.shade500
+                      : Colors.amber.shade700),
+              const SizedBox(width: 6),
+              Expanded(
+                child: Text(
+                  _monthlyBookingCount >= 2
+                      ? 'Free plan limit reached (2/2). Upgrade to book more.'
+                      : '$_monthlyBookingCount / 2 free bookings used this month.',
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: _monthlyBookingCount >= 2
+                        ? Colors.red.shade500
+                        : Colors.amber.shade800,
+                    fontWeight: FontWeight.w500,
+                  ),
+                ),
+              ),
+            ]),
+          ),
+
+        // ── Active booking banner ──────────────────────────────────────
+        if (_activeBooking != null) ...[
+          GestureDetector(
+            onTap: () => Navigator.push(
+              context,
+              MaterialPageRoute(builder: (_) => const MyBookingsScreen()),
+            ),
+            child: Container(
+              width: double.infinity,
+              margin: const EdgeInsets.only(bottom: 14),
+              padding: const EdgeInsets.all(14),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.amber.shade300),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Icon(Icons.info_outline,
+                      color: Colors.amber.shade800, size: 18),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'You have an upcoming booking at ${_activeBooking!['salonName']}.',
+                          style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w600,
+                              color: Colors.amber.shade900),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Cancel your existing booking before exploring new salons. Tap to view.',
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.amber.shade800),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right,
+                      color: Colors.amber.shade600, size: 18),
+                ],
+              ),
+            ),
+          ),
+        ],
+
         SizedBox(
           width: double.infinity,
           height: 55,
           child: ElevatedButton(
             style: ElevatedButton.styleFrom(
-              backgroundColor: Theme.of(context).colorScheme.primary,
+              backgroundColor: _activeBooking != null
+                  ? Colors.grey.shade300
+                  : Theme.of(context).colorScheme.primary,
+              foregroundColor: _activeBooking != null
+                  ? Colors.grey.shade500
+                  : Colors.white,
               shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(14)),
             ),
             onPressed: _findSalons,
-            child: const Text('Find Salons',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                if (_activeBooking != null)
+                  const Icon(Icons.block, size: 18),
+                if (_activeBooking != null) const SizedBox(width: 8),
+                const Text('Find Salons',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.bold)),
+              ],
+            ),
           ),
         ),
       ],

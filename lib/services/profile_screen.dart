@@ -1,8 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../models/user_profile_model.dart';
 import 'package:no_wait_app/services/api_service.dart';
+import 'package:no_wait_app/widgets/app_snackbar.dart';
 import 'package:no_wait_app/widgets/loading_widget.dart';
+import 'package:no_wait_app/widgets/profile_completion_widget.dart';
 import 'package:intl/intl.dart';
+import 'package:no_wait_app/main.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});
@@ -61,10 +65,25 @@ class _ProfileScreenState extends State<ProfileScreen> {
         centerTitle: true,
         title: const Text('My Profile'),
       ),
-      body: SingleChildScrollView(
+      body: RefreshIndicator(
+        onRefresh: _fetchProfile,
+        child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
         padding: const EdgeInsets.all(16),
         child: Column(
           children: [
+            // ── Completion bar ───────────────────────────────────────────────
+            ProfileCompletionWidget(
+              percent: customerCompletion(
+                fullName: user?.fullName ?? '',
+                email:    user?.email    ?? '',
+                gender:   user?.gender,
+                age:      user?.age,
+              ),
+              label: 'Profile completion',
+            ),
+            const SizedBox(height: 16),
+
             // ── Hero card ────────────────────────────────────────────────────
             Container(
               padding: const EdgeInsets.all(18),
@@ -155,7 +174,14 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
                         const SizedBox(height: 16),
 
-                        _contactRow(Icons.call_outlined, user?.phone ?? ''),
+                        Builder(builder: (ctx) {
+                          final ph = user?.phone ?? '';
+                          return _contactRow(
+                            Icons.call_outlined,
+                            ph,
+                            onTap: ph.isNotEmpty ? () => _callPhone(ph) : null,
+                          );
+                        }),
                         const SizedBox(height: 10),
                         _contactRow(Icons.mail_outline, user?.email ?? ''),
                       ],
@@ -177,6 +203,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                     user?.phone ?? ''),
                 _profileTile(Icons.mail_outline, 'Email Address',
                     user?.email ?? ''),
+                // ── Editable: Gender ──────────────────────────────────────────
+                _editableTile(
+                  icon: Icons.wc_outlined,
+                  label: 'Gender',
+                  value: _genderLabel(user?.gender),
+                  isEmpty: user?.gender == null || user!.gender!.isEmpty,
+                  onTap: _showGenderPicker,
+                ),
+                // ── Editable: Age ─────────────────────────────────────────────
+                _editableTile(
+                  icon: Icons.cake_outlined,
+                  label: 'Age',
+                  value: user?.age != null ? '${user!.age} yrs' : '',
+                  isEmpty: user?.age == null,
+                  onTap: _showAgePicker,
+                  isLast: true,
+                ),
+              ],
+            ),
+
+            const SizedBox(height: 12),
+            _profileCard(
+              title: 'Account History',
+              children: [
                 _profileTile(
                     Icons.calendar_today_outlined, 'Member Since',
                     formattedDate,
@@ -190,14 +240,12 @@ class _ProfileScreenState extends State<ProfileScreen> {
             _profileCard(
               title: 'Account',
               children: [
-                _navTile(Icons.lock_outline, 'Change Password',
-                    onTap: () {}),
                 _navTile(
                   Icons.logout,
                   'Logout',
-                  color: Colors.red,
+                  color: Colors.orange.shade700,
                   isLast: true,
-                  onTap: () {},
+                  onTap: _handleLogout,
                 ),
               ],
             ),
@@ -234,23 +282,43 @@ class _ProfileScreenState extends State<ProfileScreen> {
           ],
         ),
       ),
+    ),   // RefreshIndicator
     );
   }
 
   // ── Small helpers ──────────────────────────────────────────────────────────
 
-  Widget _contactRow(IconData icon, String text) {
-    return Row(
-      children: [
-        Icon(icon, size: 18, color: _subtleText),
-        const SizedBox(width: 8),
-        Expanded(
-          child: Text(
-            text,
-            style: TextStyle(fontSize: 15, color: _onSurface),
+  Future<void> _callPhone(String phone) async {
+    final uri = Uri(scheme: 'tel', path: phone.replaceAll(' ', ''));
+    if (await canLaunchUrl(uri)) await launchUrl(uri);
+  }
+
+  Widget _contactRow(IconData icon, String text, {VoidCallback? onTap}) {
+    final isPhone = onTap != null;
+    return GestureDetector(
+      onTap: onTap,
+      child: Row(
+        children: [
+          Icon(icon, size: 18,
+              color: isPhone ? Colors.green.shade600 : _subtleText),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              text,
+              style: TextStyle(
+                fontSize: 15,
+                color: isPhone ? Colors.green.shade700 : _onSurface,
+                decoration:
+                    isPhone ? TextDecoration.underline : TextDecoration.none,
+                fontWeight:
+                    isPhone ? FontWeight.w500 : FontWeight.normal,
+              ),
+            ),
           ),
-        ),
-      ],
+          if (isPhone)
+            Icon(Icons.call_outlined, size: 15, color: Colors.green.shade600),
+        ],
+      ),
     );
   }
 
@@ -356,6 +424,262 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
+  // ── Logout ─────────────────────────────────────────────────────────────────
+
+  Future<void> _handleLogout() async {
+    final navigator = Navigator.of(context);
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Row(children: [
+          Icon(Icons.logout, color: Colors.orange, size: 22),
+          SizedBox(width: 10),
+          Text('Logout', style: TextStyle(fontWeight: FontWeight.bold)),
+        ]),
+        content: const Text(
+          'Are you sure you want to log out of your account?',
+          style: TextStyle(color: Colors.black54),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.orange.shade700,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, Logout'),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+    await ApiService.logout();
+    if (!mounted) return;
+    navigator.pushAndRemoveUntil(
+      MaterialPageRoute(builder: (_) => const RoleSelectionScreen()),
+      (route) => false,
+    );
+  }
+
+  // ── Gender & Age helpers ───────────────────────────────────────────────────
+
+  String _genderLabel(String? g) {
+    switch (g?.toLowerCase()) {
+      case 'male':   return 'Male';
+      case 'female': return 'Female';
+      case 'other':  return 'Other';
+      default:       return '';
+    }
+  }
+
+  /// Tile that shows a value (or a prompt when empty) with a pencil edit icon.
+  Widget _editableTile({
+    required IconData icon,
+    required String label,
+    required String value,
+    required bool isEmpty,
+    required VoidCallback onTap,
+    bool isLast = false,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(vertical: 14),
+        decoration: BoxDecoration(
+          border: isLast
+              ? null
+              : Border(
+                  bottom: BorderSide(
+                      color: _onSurface.withValues(alpha: 0.08))),
+        ),
+        child: Row(children: [
+          Icon(icon, color: _subtleText, size: 20),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Text(label,
+                style: TextStyle(fontSize: 15, color: _onSurface)),
+          ),
+          Text(
+            isEmpty ? 'Tap to add' : value,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: isEmpty ? FontWeight.normal : FontWeight.w600,
+              color: isEmpty ? _subtleText : _onSurface,
+            ),
+          ),
+          const SizedBox(width: 8),
+          Icon(Icons.edit_outlined, size: 15, color: _subtleText),
+        ]),
+      ),
+    );
+  }
+
+  // ── Gender picker ──────────────────────────────────────────────────────────
+
+  Future<void> _showGenderPicker() async {
+    final options = [
+      ('male',   'Male',   Icons.man_outlined),
+      ('female', 'Female', Icons.woman_outlined),
+      ('other',  'Other',  Icons.transgender_outlined),
+    ];
+    final messenger = ScaffoldMessenger.of(context);
+
+    await showModalBottomSheet(
+      context: context,
+      backgroundColor: Colors.transparent,
+      builder: (ctx) => Container(
+        decoration: const BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+        ),
+        padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Center(
+              child: Container(
+                width: 40, height: 4,
+                margin: const EdgeInsets.only(bottom: 18),
+                decoration: BoxDecoration(
+                    color: Colors.grey.shade300,
+                    borderRadius: BorderRadius.circular(2)),
+              ),
+            ),
+            const Text('Select Gender',
+                style: TextStyle(
+                    fontSize: 17, fontWeight: FontWeight.bold)),
+            const SizedBox(height: 16),
+            ...options.map((o) {
+              final (value, label, iconData) = o;
+              final selected = user?.gender?.toLowerCase() == value;
+              return ListTile(
+                leading: Icon(iconData,
+                    color: selected ? _primary : Colors.grey.shade600),
+                title: Text(label,
+                    style: TextStyle(
+                        fontWeight: selected
+                            ? FontWeight.bold
+                            : FontWeight.normal,
+                        color:
+                            selected ? _primary : _onSurface)),
+                trailing: selected
+                    ? Icon(Icons.check_circle_rounded,
+                        color: _primary)
+                    : null,
+                contentPadding: EdgeInsets.zero,
+                onTap: () async {
+                  final nav = Navigator.of(ctx);
+                  nav.pop();
+                  try {
+                    await ApiService.updateProfile({'gender': value});
+                    if (!mounted) return;
+                    setState(() {
+                      user = UserProfileModel(
+                        id:        user?.id ?? '',
+                        fullName:  user?.fullName ?? '',
+                        phone:     user?.phone ?? '',
+                        email:     user?.email ?? '',
+                        role:      user?.role ?? '',
+                        age:       user?.age,
+                        gender:    value,
+                        createdAt: user?.createdAt,
+                      );
+                    });
+                  } catch (_) {
+                    AppSnackbar.errorM(messenger, 'Failed to update gender.');
+                  }
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ── Age picker ─────────────────────────────────────────────────────────────
+
+  Future<void> _showAgePicker() async {
+    final ctrl      = TextEditingController(
+        text: user?.age != null ? '${user!.age}' : '');
+    final messenger = ScaffoldMessenger.of(context);
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20)),
+        title: const Text('Update Age',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.number,
+          maxLength: 3,
+          decoration: InputDecoration(
+            hintText: 'Enter your age',
+            filled: true,
+            fillColor: Colors.grey.shade100,
+            counterText: '',
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: _primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              final age = int.tryParse(ctrl.text.trim());
+              if (age == null || age < 1 || age > 120) return;
+              final nav = Navigator.of(ctx);
+              nav.pop();
+              try {
+                await ApiService.updateProfile({'age': age});
+                if (!mounted) return;
+                setState(() {
+                  user = UserProfileModel(
+                    id:        user?.id ?? '',
+                    fullName:  user?.fullName ?? '',
+                    phone:     user?.phone ?? '',
+                    email:     user?.email ?? '',
+                    role:      user?.role ?? '',
+                    age:       age,
+                    gender:    user?.gender,
+                    createdAt: user?.createdAt,
+                  );
+                });
+              } catch (_) {
+                AppSnackbar.errorM(messenger, 'Failed to update age.');
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+  }
+
   // ── Edit name dialog ───────────────────────────────────────────────────────
 
   void _showEditNameDialog(BuildContext ctx) {
@@ -415,7 +739,30 @@ class _ProfileScreenState extends State<ProfileScreen> {
                   width: double.infinity,
                   height: 52,
                   child: ElevatedButton(
-                    onPressed: () => Navigator.pop(ctx),
+                    onPressed: () async {
+                      final name = controller.text.trim();
+                      if (name.isEmpty) return;
+                      final nav = Navigator.of(ctx);
+                      try {
+                        await ApiService.updateProfile({'fullName': name});
+                        nav.pop();
+                        if (!mounted) return;
+                        setState(() {
+                          user = UserProfileModel(
+                            id:        user?.id ?? '',
+                            fullName:  name,
+                            phone:     user?.phone ?? '',
+                            email:     user?.email ?? '',
+                            role:      user?.role ?? '',
+                            age:       user?.age,
+                            gender:    user?.gender,
+                            createdAt: user?.createdAt,
+                          );
+                        });
+                      } catch (_) {
+                        nav.pop();
+                      }
+                    },
                     child: const Text('Save Changes',
                         style: TextStyle(fontSize: 16)),
                   ),

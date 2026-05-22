@@ -4,8 +4,10 @@ import 'package:intl/intl.dart';
 import 'services/api_service.dart';
 import 'services/location_prefs.dart';
 import 'widgets/app_snackbar.dart';
+import 'widgets/error_retry.dart';
 import 'widgets/loading_widget.dart';
 import 'widgets/star_rating.dart';
+import 'salon_detail_screen.dart';
 
 // ─── Sort options ─────────────────────────────────────────────────────────────
 
@@ -45,13 +47,30 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
   List<Map<String, dynamic>> _salons       = [];
   List<String>               _allAmenities = [];
   List<String>               _allServices  = [];
+  Set<String>                _wishlistIds  = {};
 
   // Active filters
   Set<String> _selAmenities = {};
   Set<String> _selServices  = {};
   String      _sort         = 'distance_asc';
 
+  // Search
+  final _searchCtrl = TextEditingController();
+  String _searchQuery = '';
+
   bool _loading = true;
+  bool _hasError = false;
+
+  // Computed: salons filtered by the live search query
+  List<Map<String, dynamic>> get _filtered {
+    if (_searchQuery.isEmpty) return _salons;
+    final q = _searchQuery.toLowerCase();
+    return _salons.where((s) {
+      final name = (s['name'] as String? ?? '').toLowerCase();
+      final city = (s['city'] as String? ?? '').toLowerCase();
+      return name.contains(q) || city.contains(q);
+    }).toList();
+  }
 
   @override
   void initState() {
@@ -62,43 +81,82 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
   // ── Data loading ───────────────────────────────────────────────────────────
 
   Future<void> _loadAll() async {
-    setState(() => _loading = true);
+    setState(() { _loading = true; _hasError = false; });
     try {
       final results = await Future.wait([
         ApiService.searchSalons(
           lat:       widget.location.lat,
           lng:       widget.location.lng,
-          radiusKm:  1.0,
+          radiusKm:  5.0,
           amenities: _selAmenities.toList(),
           services:  _selServices.toList(),
           sort:      _sort,
         ),
         ApiService.getAmenities(),
         ApiService.getServices(),
+        ApiService.getWishlistIds(),   // load heart states in parallel
       ]);
 
       if (!mounted) return;
       setState(() {
-        _salons       = List<Map<String, dynamic>>.from(results[0]);
-        _allAmenities = results[1]
+        _salons       = List<Map<String, dynamic>>.from(results[0] as List);
+        _allAmenities = (results[1] as List)
             .map((e) => (e['name'] as String?) ?? '')
             .where((e) => e.isNotEmpty)
             .toList();
-        _allServices  = results[2]
+        _allServices  = (results[2] as List)
             .map((e) => (e['name'] as String?) ?? '')
             .where((e) => e.isNotEmpty)
             .toList();
+        _wishlistIds  = results[3] as Set<String>;
         _loading = false;
       });
     } catch (e) {
-      if (mounted) {
-        setState(() => _loading = false);
-        AppSnackbar.error(context, 'Failed to load salons. Please try again.');
-      }
+      if (mounted) setState(() { _loading = false; _hasError = true; });
     }
   }
 
+  @override
+  void dispose() {
+    _searchCtrl.dispose();
+    super.dispose();
+  }
+
   Future<void> _refresh() => _loadAll();
+
+  Future<void> _toggleWishlist(String salonId) async {
+    final isWishlisted = _wishlistIds.contains(salonId);
+    // Optimistic update
+    setState(() {
+      if (isWishlisted) {
+        _wishlistIds.remove(salonId);
+      } else {
+        _wishlistIds.add(salonId);
+      }
+    });
+
+    final ok = isWishlisted
+        ? await ApiService.removeFromWishlist(salonId)
+        : await ApiService.addToWishlist(salonId);
+
+    if (!mounted) return;
+    if (!ok) {
+      // Revert on failure
+      setState(() {
+        if (isWishlisted) {
+          _wishlistIds.add(salonId);
+        } else {
+          _wishlistIds.remove(salonId);
+        }
+      });
+      AppSnackbar.error(context, 'Could not update wishlist. Try again.');
+    } else {
+      AppSnackbar.success(
+        context,
+        isWishlisted ? 'Removed from wishlist' : 'Added to wishlist',
+      );
+    }
+  }
 
   // ── Filter sheet helpers ───────────────────────────────────────────────────
 
@@ -189,11 +247,50 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
               ),
               if (!_loading)
                 Text(
-                  '${_salons.length} salon${_salons.length == 1 ? '' : 's'}',
+                  '${_filtered.length} salon${_filtered.length == 1 ? '' : 's'}',
                   style: TextStyle(fontSize: 12, color: primary,
                       fontWeight: FontWeight.w600),
                 ),
             ]),
+          ),
+
+          // ── Search bar ────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 0),
+            child: TextField(
+              controller: _searchCtrl,
+              onChanged: (v) => setState(() => _searchQuery = v.trim()),
+              style: const TextStyle(fontSize: 14),
+              decoration: InputDecoration(
+                hintText: 'Search salon name or area…',
+                hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 14),
+                prefixIcon: const Icon(Icons.search, size: 20),
+                suffixIcon: _searchQuery.isNotEmpty
+                    ? IconButton(
+                        icon: const Icon(Icons.close, size: 18),
+                        onPressed: () {
+                          _searchCtrl.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      )
+                    : null,
+                filled: true,
+                fillColor: Colors.white,
+                isDense: true,
+                contentPadding: const EdgeInsets.symmetric(
+                    vertical: 10, horizontal: 14),
+                border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade200)),
+                enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.shade200)),
+                focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide:
+                        BorderSide(color: primary.withValues(alpha: 0.5))),
+              ),
+            ),
           ),
 
           // ── Filter chips ──────────────────────────────────────────────────
@@ -255,20 +352,22 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
           Expanded(
             child: _loading
                 ? const AppLoadingIndicator(message: 'Finding salons nearby…')
-                : _salons.isEmpty
-                    ? _buildEmpty()
-                    : RefreshIndicator(
+                : _hasError
+                    ? ErrorRetry(onRetry: _loadAll)
+                    : _filtered.isEmpty
+                        ? _buildEmpty()
+                        : RefreshIndicator(
                         onRefresh: _refresh,
                         child: ListView.separated(
                           padding: EdgeInsets.symmetric(
                             horizontal: isTablet ? 32 : 16,
                             vertical: 14,
                           ),
-                          itemCount: _salons.length,
+                          itemCount: _filtered.length,
                           separatorBuilder: (context, index) =>
                               const SizedBox(height: 14),
                           itemBuilder: (_, i) =>
-                              _buildSalonCard(_salons[i], primary),
+                              _buildSalonCard(_filtered[i], primary),
                         ),
                       ),
           ),
@@ -341,22 +440,39 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
   // ── Salon card ─────────────────────────────────────────────────────────────
 
   Widget _buildSalonCard(Map<String, dynamic> salon, Color primary) {
-    final name     = salon['name']        as String? ?? 'Salon';
-    final city     = salon['city']        as String? ?? '';
-    final address  = salon['address']     as String? ?? '';
-    final open     = salon['openingTime'] as String?;
-    final close    = salon['closingTime'] as String?;
-    final dist     = salon['distance']    as num?;
-    final rating   = (salon['rating']     as num?)?.toDouble() ?? 0.0;
-    final reviews  = (salon['reviewCount'] as num?)?.toInt()   ?? 0;
-    final services = (salon['services']   as List?)?.cast<String>() ?? [];
-    final amenities = (salon['amenities'] as List?)?.cast<String>() ?? [];
+    final salonId    = salon['id']             as String;
+    final name       = salon['name']           as String? ?? 'Salon';
+    final city       = salon['city']           as String? ?? '';
+    final address    = salon['address']        as String? ?? '';
+    final open       = salon['openingTime']    as String?;
+    final close      = salon['closingTime']    as String?;
+    final dist       = salon['distance']       as num?;
+    final rating     = (salon['rating']        as num?)?.toDouble() ?? 0.0;
+    final reviews    = (salon['reviewCount']   as num?)?.toInt()   ?? 0;
+    final services   = (salon['services']      as List?)?.cast<String>() ?? [];
+    final amenities  = (salon['amenities']     as List?)?.cast<String>() ?? [];
+    final isWishlisted = _wishlistIds.contains(salonId);
 
     final locationStr = [address, city]
         .where((e) => e.isNotEmpty)
         .join(', ');
 
-    return Container(
+    return GestureDetector(
+      onTap: () => Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => SalonDetailScreen(
+            salonId:     salonId,
+            salonName:   name,
+            address:     address,
+            city:        city,
+            rating:      rating,
+            reviewCount: reviews,
+            initialDate: widget.date,
+          ),
+        ),
+      ),
+      child: Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
         color: Colors.white,
@@ -394,7 +510,7 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
                 ],
               ),
             ),
-            if (dist != null)
+            if (dist != null) ...[
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
                 decoration: BoxDecoration(
@@ -405,6 +521,23 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
                         color: primary)),
               ),
+              const SizedBox(width: 4),
+            ],
+            // Wishlist heart button
+            GestureDetector(
+              onTap: () => _toggleWishlist(salonId),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  isWishlisted
+                      ? Icons.favorite_rounded
+                      : Icons.favorite_border_rounded,
+                  key: ValueKey(isWishlisted),
+                  size: 22,
+                  color: isWishlisted ? Colors.red.shade400 : Colors.grey.shade400,
+                ),
+              ),
+            ),
           ]),
 
           const SizedBox(height: 10),
@@ -445,7 +578,8 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
           ],
         ],
       ),
-    );
+    ),  // Container
+    );  // GestureDetector
   }
 
   Widget _infoRow(IconData icon, String text) {

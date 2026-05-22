@@ -487,7 +487,7 @@ class _Step2ScreenState extends State<Step2Screen> {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
       decoration: BoxDecoration(
-        color: const Color(0xFF6FCF97).withOpacity(0.2),
+        color: const Color(0xFF6FCF97).withValues(alpha: 0.2),
         borderRadius: BorderRadius.circular(20),
       ),
       child: Row(
@@ -596,7 +596,7 @@ class _Step2ScreenState extends State<Step2Screen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF6FCF97).withOpacity(0.1),
+        color: const Color(0xFF6FCF97).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: const Text(

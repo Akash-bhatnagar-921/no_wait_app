@@ -3,6 +3,10 @@ import 'package:no_wait_app/main.dart';
 import 'package:no_wait_app/services/api_service.dart';
 import 'package:no_wait_app/widgets/app_snackbar.dart';
 import 'package:no_wait_app/widgets/loading_widget.dart';
+import 'package:package_info_plus/package_info_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
+import 'help_faq_screen.dart';
 
 class SettingsScreen extends StatefulWidget {
   const SettingsScreen({super.key});
@@ -15,6 +19,42 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _bookingNotifications = true;
   bool _promotionalNotifications = false;
   bool _smsAlerts = true;
+  String _appVersion = '1.0.0';
+
+  static const _kBookingNotif = 'settings_booking_notif';
+  static const _kPromoNotif   = 'settings_promo_notif';
+  static const _kSmsAlerts    = 'settings_sms_alerts';
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSettings();
+    _loadVersion();
+  }
+
+  Future<void> _loadVersion() async {
+    final info = await PackageInfo.fromPlatform();
+    if (mounted) {
+      setState(() =>
+          _appVersion = '${info.version}+${info.buildNumber}');
+    }
+  }
+
+  Future<void> _loadSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (mounted) {
+      setState(() {
+        _bookingNotifications    = prefs.getBool(_kBookingNotif) ?? true;
+        _promotionalNotifications = prefs.getBool(_kPromoNotif)  ?? false;
+        _smsAlerts               = prefs.getBool(_kSmsAlerts)    ?? true;
+      });
+    }
+  }
+
+  Future<void> _saveBool(String key, bool value) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool(key, value);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -42,8 +82,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: 'Booking Reminders',
                   subtitle: 'Get notified before your appointments',
                   value: _bookingNotifications,
-                  onChanged: (v) =>
-                      setState(() => _bookingNotifications = v),
+                  onChanged: (v) async {
+                    setState(() => _bookingNotifications = v);
+                    await _saveBool(_kBookingNotif, v);
+                  },
                 ),
                 _divider(),
                 _toggleTile(
@@ -51,8 +93,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: 'Offers & Promotions',
                   subtitle: 'Receive deals from nearby salons',
                   value: _promotionalNotifications,
-                  onChanged: (v) =>
-                      setState(() => _promotionalNotifications = v),
+                  onChanged: (v) async {
+                    setState(() => _promotionalNotifications = v);
+                    await _saveBool(_kPromoNotif, v);
+                  },
                 ),
                 _divider(),
                 _toggleTile(
@@ -60,8 +104,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   title: 'SMS Alerts',
                   subtitle: 'Receive booking confirmations via SMS',
                   value: _smsAlerts,
-                  onChanged: (v) =>
-                      setState(() => _smsAlerts = v),
+                  onChanged: (v) async {
+                    setState(() => _smsAlerts = v);
+                    await _saveBool(_kSmsAlerts, v);
+                  },
                   isLast: true,
                 ),
               ],
@@ -75,21 +121,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
               icon: Icons.person_outline,
               children: [
                 _navTile(
-                  icon: Icons.lock_outline,
-                  title: 'Change Password',
-                  onTap: () {},
-                ),
-                _divider(),
-                _navTile(
                   icon: Icons.phone_outlined,
                   title: 'Update Phone Number',
-                  onTap: () {},
+                  subtitle: 'Requires OTP re-verification',
+                  onTap: () => AppSnackbar.info(
+                    context,
+                    'Phone update requires identity re-verification. Contact support at support@baari.app.',
+                  ),
                 ),
                 _divider(),
                 _navTile(
                   icon: Icons.mail_outline,
                   title: 'Update Email Address',
-                  onTap: () {},
+                  onTap: () => _showUpdateEmailDialog(),
                   isLast: true,
                 ),
               ],
@@ -105,24 +149,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 _navTile(
                   icon: Icons.help_outline,
                   title: 'Help & FAQ',
-                  onTap: () {},
+                  onTap: () => Navigator.push(context,
+                      MaterialPageRoute(builder: (_) => const HelpFaqScreen())),
                 ),
                 _divider(),
                 _navTile(
                   icon: Icons.headset_mic_outlined,
                   title: 'Contact Support',
                   subtitle: '+91-9999999999',
-                  onTap: () => AppSnackbar.info(
-                    context,
-                    'Call us @ +91-9999999999',
-                    actionLabel: '✕',
-                  ),
+                  onTap: () async {
+                    final messenger = ScaffoldMessenger.of(context);
+                    final uri = Uri(scheme: 'tel', path: '+919999999999');
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri);
+                    } else {
+                      AppSnackbar.infoM(messenger, 'Call us @ +91-9999999999');
+                    }
+                  },
                 ),
                 _divider(),
                 _navTile(
                   icon: Icons.star_outline,
                   title: 'Rate the App',
-                  onTap: () {},
+                  onTap: () async {
+                    final uri = Uri.parse(
+                        'https://play.google.com/store/apps/details?id=com.baari.app');
+                    if (await canLaunchUrl(uri)) {
+                      await launchUrl(uri,
+                          mode: LaunchMode.externalApplication);
+                    }
+                  },
                   isLast: true,
                 ),
               ],
@@ -153,7 +209,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     if (confirmed != true) return;
                     await ApiService.logout();
                     if (!mounted) return;
-                    navigator.pushAndRemoveUntil(
+                    Navigator.of(navigator.context, rootNavigator: true)
+                        .pushAndRemoveUntil(
                       MaterialPageRoute(
                           builder: (_) => const RoleSelectionScreen()),
                       (route) => false,
@@ -173,9 +230,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
             const SizedBox(height: 30),
 
-            const Text(
-              'Baari v1.0.0',
-              style: TextStyle(color: Colors.grey, fontSize: 12),
+            Text(
+              'Baari v$_appVersion',
+              style: const TextStyle(color: Colors.grey, fontSize: 12),
             ),
             const SizedBox(height: 24),
           ],
@@ -185,6 +242,58 @@ class _SettingsScreenState extends State<SettingsScreen> {
   }
 
   // ── Actions ───────────────────────────────────────────────────────────────
+
+  Future<void> _showUpdateEmailDialog() async {
+    final ctrl    = TextEditingController();
+    final primary = Theme.of(context).colorScheme.primary;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Update Email Address',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: TextField(
+          controller: ctrl,
+          keyboardType: TextInputType.emailAddress,
+          decoration: InputDecoration(
+            hintText: 'Enter new email',
+            filled: true,
+            fillColor: Colors.grey.shade100,
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(12),
+                borderSide: BorderSide.none),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primary, foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () async {
+              final email = ctrl.text.trim();
+              if (email.isEmpty || !email.contains('@')) return;
+              final nav = Navigator.of(ctx);
+              try {
+                await ApiService.updateProfile({'email': email});
+                nav.pop();
+                if (mounted) AppSnackbar.success(context, 'Email updated.');
+              } catch (_) {
+                nav.pop();
+              }
+            },
+            child: const Text('Save'),
+          ),
+        ],
+      ),
+    );
+    ctrl.dispose();
+  }
 
   Future<void> _handleDeleteAccount() async {
     // Capture all context-dependent objects BEFORE any await

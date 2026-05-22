@@ -46,7 +46,6 @@ class _SignupScreenState extends State<SignupScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // 🔙 BACK
                   IconButton(
                     icon: const Icon(Icons.arrow_back),
                     onPressed: () => Navigator.pop(context),
@@ -54,10 +53,9 @@ class _SignupScreenState extends State<SignupScreen> {
 
                   const SizedBox(height: 10),
 
-                  // ✂️ LOGO
                   Center(
                     child: Image.asset(
-                      "assets/logo.png", // 👈 apna scissor-comb image yahan daal
+                      "assets/logo.png",
                       height: 60,
                     ),
                   ),
@@ -131,7 +129,6 @@ class _SignupScreenState extends State<SignupScreen> {
 
                   const SizedBox(height: 20),
 
-                  // 🔥 BUTTON
                   SizedBox(
                     width: double.infinity,
                     height: 55,
@@ -150,9 +147,6 @@ class _SignupScreenState extends State<SignupScreen> {
                         final age = ageController.text.trim();
                         final parsedAge = int.tryParse(age);
 
-                        print("Name:" + name);
-
-                        // 🔥 BASIC VALIDATION
                         if (name.isEmpty ||
                             phone.isEmpty ||
                             email.isEmpty ||
@@ -182,8 +176,6 @@ class _SignupScreenState extends State<SignupScreen> {
                         );
 
                         try {
-                          print("Calling REGISTER API...");
-
                           final res = await ApiService.register(
                             phone: phone,
                             role: "customer",
@@ -192,16 +184,13 @@ class _SignupScreenState extends State<SignupScreen> {
                             age: parsedAge,
                             gender: selectedGender,
                           );
-                          print("Response: $res");
                           if (!context.mounted) return;
                           Navigator.of(context, rootNavigator: true).pop();
 
-                          // 🔥 SAVE TOKEN
                           await ApiService.saveToken(res['access_token']);
 
                           if (!context.mounted) return;
 
-                          // 👉 NEXT SCREEN
                           Navigator.pushReplacement(
                             context,
                             MaterialPageRoute(
@@ -216,9 +205,7 @@ class _SignupScreenState extends State<SignupScreen> {
                               behavior: SnackBarBehavior.floating,
                             ),
                           );
-                          // 🔥 loader band
                         } catch (e) {
-                          print("ERROR: $e");
                           if (!context.mounted) return;
                           Navigator.of(context, rootNavigator: true).pop();
 
@@ -280,7 +267,6 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
-  // 🔥 INPUT FIELD
   Widget _inputField(
     IconData icon,
     String hint,
@@ -304,7 +290,6 @@ class _SignupScreenState extends State<SignupScreen> {
     );
   }
 
-  // 🔥 GENDER BOX
   Widget _genderBox(String gender, IconData icon) {
     final isSelected = selectedGender == gender;
 
@@ -320,7 +305,7 @@ class _SignupScreenState extends State<SignupScreen> {
           padding: const EdgeInsets.symmetric(vertical: 12),
           decoration: BoxDecoration(
             color: isSelected
-                ? const Color(0xFF6FCF97).withOpacity(0.2)
+                ? const Color(0xFF6FCF97).withValues(alpha: 0.2)
                 : Colors.grey.shade100,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(

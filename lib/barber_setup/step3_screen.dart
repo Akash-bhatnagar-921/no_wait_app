@@ -413,7 +413,7 @@ class _Step3ScreenState extends State<Step3Screen> {
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
-        color: const Color(0xFF6FCF97).withOpacity(0.1),
+        color: const Color(0xFF6FCF97).withValues(alpha: 0.1),
         borderRadius: BorderRadius.circular(12),
       ),
       child: const Text(

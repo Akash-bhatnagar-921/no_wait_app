@@ -34,20 +34,24 @@ class ThemeManager extends ChangeNotifier {
   ThemeData get themeData => AppTheme.of(_current);
 
   // ── Set from gender string (called after login) ───────────────────────────
-
+  // Always uses the Natural Green theme regardless of the user's gender.
+  // To restore per-gender theming in the future, uncomment the branching below.
   Future<void> setThemeFromGender(String? gender) async {
-    final g = gender?.toLowerCase().trim() ?? '';
-    GenderTheme next;
-    if (g == 'male' || g == 'm') {
-      next = GenderTheme.male;
-    } else if (g == 'female' || g == 'f') {
-      next = GenderTheme.female;
-    } else if (g.isNotEmpty) {
-      next = GenderTheme.other;
-    } else {
-      return; // gender unknown — keep current theme
-    }
-    await _apply(next);
+    await _apply(GenderTheme.female);
+
+    // ── Per-gender branching (disabled — uncomment to re-enable) ──────────
+    // final g = gender?.toLowerCase().trim() ?? '';
+    // GenderTheme next;
+    // if (g == 'male' || g == 'm') {
+    //   next = GenderTheme.male;
+    // } else if (g == 'female' || g == 'f') {
+    //   next = GenderTheme.female;
+    // } else if (g.isNotEmpty) {
+    //   next = GenderTheme.other;
+    // } else {
+    //   return; // gender unknown — keep current theme
+    // }
+    // await _apply(next);
   }
 
   // ── Manual override (Settings page) ──────────────────────────────────────
@@ -73,13 +77,14 @@ class ThemeManager extends ChangeNotifier {
   }
 
   static GenderTheme _fromString(String? s) {
-    switch (s) {
-      case 'male':
-        return GenderTheme.male;
-      case 'other':
-        return GenderTheme.other;
-      default:
-        return GenderTheme.female;
-    }
+    // Always return green — ignores any previously-saved non-green preference.
+    // To restore per-gender theming, reinstate the switch below.
+    return GenderTheme.female;
+
+    // switch (s) {
+    //   case 'male':  return GenderTheme.male;
+    //   case 'other': return GenderTheme.other;
+    //   default:      return GenderTheme.female;
+    // }
   }
 }

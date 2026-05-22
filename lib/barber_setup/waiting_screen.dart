@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:no_wait_app/barber_setup/barber_home_screen.dart';
 import 'package:no_wait_app/main.dart';
-import 'package:no_wait_app/login_screen.dart';
 import 'package:no_wait_app/services/api_service.dart';
 
 // Update with real support number
@@ -24,17 +24,20 @@ class _WaitingScreenState extends State<WaitingScreen> {
   @override
   void initState() {
     super.initState();
-    _updateRemaining();
 
-    // Countdown: tick every second
+    // Assign timers BEFORE calling _updateRemaining — that method may call
+    // _countdownTimer.cancel() if the deadline has already passed, which would
+    // throw LateInitializationError on a 'late' field that isn't set yet.
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted) setState(() => _updateRemaining());
     });
 
-    // Poll backend every 30 s for approval
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
       _checkApprovalStatus();
     });
+
+    // Safe to call now — both timers are initialised
+    _updateRemaining();
   }
 
   void _updateRemaining() {
@@ -56,10 +59,11 @@ class _WaitingScreenState extends State<WaitingScreen> {
       if (approved != null && mounted) {
         _pollTimer.cancel();
         _countdownTimer.cancel();
-        // Salon approved — go to login page
+        // Token from createSalon is still valid (30-day JWT).
+        // Go directly to the dashboard — no need to log in again.
         Navigator.pushAndRemoveUntil(
           context,
-          MaterialPageRoute(builder: (_) => const LoginScreen()),
+          MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen()),
           (route) => false,
         );
       }

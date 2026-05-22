@@ -52,9 +52,10 @@ class _OtpScreenState extends State<OtpScreen> {
   void initState() {
     super.initState();
     otpSecondsRemaining = widget.expiresInSeconds;
-    resendRemaining = widget.resendRemaining;
-    maskedEmail = widget.email;
+    resendRemaining     = widget.resendRemaining;
+    maskedEmail         = widget.email;
     _startOtpTimer(widget.expiresInSeconds);
+    _startResendCooldown(60); // always block resend for 60 s on first load
   }
 
   @override
@@ -177,8 +178,8 @@ class _OtpScreenState extends State<OtpScreen> {
           maskedEmail.isEmpty
               ? (_isProfessional
                   ? "Contact Baari admin for your OTP code"
-                  : "Enter the code sent to your registered email")
-              : "Enter the code sent to $maskedEmail",
+                  : "Check your SMS or registered email for the code")
+              : "Check your SMS or $maskedEmail for the code",
           textAlign: TextAlign.center,
           style: const TextStyle(color: Colors.grey),
         ),
@@ -467,9 +468,10 @@ class _OtpScreenState extends State<OtpScreen> {
 
       _clearOtp();
       _startOtpTimer(res['expiresInSeconds'] as int? ?? 300);
+      _startResendCooldown(60); // lock resend for 60 s after each send
 
       setState(() {
-        maskedEmail = res['email']?.toString() ?? maskedEmail;
+        maskedEmail     = res['email']?.toString() ?? maskedEmail;
         resendRemaining = res['resendRemaining'] as int? ?? resendRemaining;
       });
 
@@ -505,6 +507,16 @@ class _OtpScreenState extends State<OtpScreen> {
         return;
       }
       setState(() => otpSecondsRemaining -= 1);
+    });
+  }
+
+  void _startResendCooldown(int seconds) {
+    resendBlockTimer?.cancel();
+    setState(() => resendBlockedSeconds = seconds);
+    resendBlockTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) { timer.cancel(); return; }
+      setState(() => resendBlockedSeconds -= 1);
+      if (resendBlockedSeconds <= 0) timer.cancel();
     });
   }
 
