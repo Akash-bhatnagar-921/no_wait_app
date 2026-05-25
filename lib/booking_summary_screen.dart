@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 
 import 'services/api_service.dart';
 import 'widgets/app_snackbar.dart';
+import 'home_screen.dart';
 import 'my_bookings_screen.dart';
 
 class BookingSummaryScreen extends StatefulWidget {
@@ -169,9 +170,15 @@ class _BookingSummaryScreenState extends State<BookingSummaryScreen> {
                     borderRadius: BorderRadius.circular(12)),
               ),
               onPressed: () {
-                Navigator.of(context).popUntil((r) => r.isFirst);
-                Navigator.pushReplacement(
-                  context,
+                // Replace the entire route stack with a clean [HomeScreen → MyBookingsScreen].
+                // popUntil(isFirst) was sending users to RoleSelectionScreen when they
+                // arrived via signup/login flow, which looked like a logout.
+                final nav = Navigator.of(context);
+                nav.pushAndRemoveUntil(
+                  MaterialPageRoute(builder: (_) => const HomeScreen()),
+                  (route) => false,
+                );
+                nav.push(
                   MaterialPageRoute(builder: (_) => const MyBookingsScreen()),
                 );
               },

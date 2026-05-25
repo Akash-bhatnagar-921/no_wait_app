@@ -401,31 +401,39 @@ class _OtpScreenState extends State<OtpScreen> {
           orElse: () => null,
         );
 
-        if (pending != null) {
-          final createdAt = DateTime.parse(
-            pending['createdAt'] as String? ??
-                DateTime.now().toIso8601String(),
-          );
-          navigator.pushReplacement(
-            MaterialPageRoute(
-              builder: (_) => WaitingScreen(submittedAt: createdAt),
-            ),
-          );
-          return;
-        }
-
         final approved = salons.firstWhere(
           (s) => s['status'] == 'approved',
           orElse: () => null,
         );
 
-        if (approved == null) {
+        // ── Pending-only path ─────────────────────────────────────────────
+        if (pending != null && approved == null) {
+          final createdAt = DateTime.tryParse(
+                pending['createdAt'] as String? ?? '') ??
+              DateTime.now();
+          final hoursSince = DateTime.now().difference(createdAt).inHours;
+
+          if (hoursSince < 24) {
+            // Still within the 24 h review window — show countdown screen.
+            navigator.pushReplacement(
+              MaterialPageRoute(
+                  builder: (_) => WaitingScreen(submittedAt: createdAt)),
+            );
+            return;
+          }
+          // 24 h+ have passed but admin hasn't approved yet.
+          // Let the professional into the dashboard (salon stays hidden from
+          // customer searches until approved).
+          // Fall through to secret-code verification below.
+        }
+
+        if (pending == null && approved == null) {
           AppSnackbar.infoM(messenger,
               'No salon found. Please contact Baari support.');
           return;
         }
 
-        // Step 2 — verify salon secret code
+        // ── Step 2 — verify salon secret code ────────────────────────────
         try {
           await ApiService.verifySalonCode(
             phone: widget.phone,
@@ -437,8 +445,9 @@ class _OtpScreenState extends State<OtpScreen> {
         }
 
         if (!mounted) return;
-        navigator.pushReplacement(
+        navigator.pushAndRemoveUntil(
           MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen()),
+          (route) => false,
         );
         return;
       }
@@ -447,8 +456,9 @@ class _OtpScreenState extends State<OtpScreen> {
       navigator.pop(); // dismiss loader
       if (!mounted) return;
 
-      navigator.pushReplacement(
+      navigator.pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const HomeScreen()),
+        (route) => false,
       );
       AppSnackbar.successM(messenger, 'Login successful!');
     } catch (e) {

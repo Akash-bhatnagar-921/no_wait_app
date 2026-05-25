@@ -13,6 +13,8 @@ class ManageBarbersScreen extends StatefulWidget {
 class _ManageBarbersScreenState extends State<ManageBarbersScreen> {
   List<Map<String, dynamic>> _barbers = [];
   bool _loading = true;
+  int _maxBarbers = 1;
+  String _planLabel = 'Free';
 
   @override
   void initState() {
@@ -22,12 +24,30 @@ class _ManageBarbersScreenState extends State<ManageBarbersScreen> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final raw = await ApiService.getMyBarbers();
+    final results = await Future.wait([
+      ApiService.getMyBarbers(),
+      ApiService.getProfessionalSubscription(),
+    ]);
     if (mounted) {
+      final proSub  = results[1] as Map<String, dynamic>;
+      final features = proSub['features'] as Map<String, dynamic>? ?? {};
+      final raw     = features['maxBarbers'];
+      final isUnlimited = raw == null || (raw is num && raw > 999);
       setState(() {
-        _barbers = raw.cast<Map<String, dynamic>>();
-        _loading = false;
+        _barbers   = (results[0] as List).cast<Map<String, dynamic>>();
+        _maxBarbers = isUnlimited ? 999999 : (raw as num).toInt();
+        _planLabel  = _formatPlanLabel(proSub['plan'] as String? ?? 'free');
+        _loading   = false;
       });
+    }
+  }
+
+  String _formatPlanLabel(String plan) {
+    switch (plan) {
+      case 'professional_starter': return 'Starter';
+      case 'professional_growth':  return 'Growth';
+      case 'professional_premium': return 'Premium';
+      default: return 'Free';
     }
   }
 
@@ -275,6 +295,8 @@ class _ManageBarbersScreenState extends State<ManageBarbersScreen> {
     final primary  = Theme.of(context).colorScheme.primary;
     final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
 
+    final atLimit = !_loading && _maxBarbers < 999999 && _barbers.length >= _maxBarbers;
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Manage Barbers',
@@ -282,15 +304,60 @@ class _ManageBarbersScreenState extends State<ManageBarbersScreen> {
         centerTitle: true,
       ),
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _addBarber,
-        icon: const Icon(Icons.person_add_outlined),
-        label: const Text('Add Barber'),
-        backgroundColor: primary,
+        onPressed: atLimit ? _showUpgradePrompt : _addBarber,
+        icon: Icon(atLimit
+            ? Icons.lock_outline
+            : Icons.person_add_outlined),
+        label: Text(atLimit ? 'Upgrade to Add More' : 'Add Barber'),
+        backgroundColor: atLimit ? Colors.grey.shade400 : primary,
         foregroundColor: Colors.white,
       ),
       body: _loading
           ? const AppLoadingIndicator(message: 'Loading barbers…')
-          : _barbers.isEmpty
+          : Column(
+              children: [
+                // ── Plan / barber count banner ──────────────────────────────
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 10),
+                  color: Colors.grey.shade50,
+                  child: Row(children: [
+                    Icon(Icons.people_outline,
+                        size: 16, color: Colors.grey.shade600),
+                    const SizedBox(width: 8),
+                    Text(
+                      _maxBarbers >= 999999
+                          ? '${_barbers.length} barber${_barbers.length == 1 ? '' : 's'}  ·  $_planLabel plan (unlimited)'
+                          : '${_barbers.length} / $_maxBarbers barber${_maxBarbers == 1 ? '' : 's'}  ·  $_planLabel plan',
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.grey.shade700,
+                          fontWeight: FontWeight.w500),
+                    ),
+                    if (atLimit) ...[
+                      const Spacer(),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: Colors.orange.shade50,
+                          borderRadius: BorderRadius.circular(8),
+                          border:
+                              Border.all(color: Colors.orange.shade200),
+                        ),
+                        child: Text('Limit reached',
+                            style: TextStyle(
+                                fontSize: 11,
+                                color: Colors.orange.shade700,
+                                fontWeight: FontWeight.w600)),
+                      ),
+                    ],
+                  ]),
+                ),
+                // ── List ───────────────────────────────────────────────────
+                Expanded(
+                  child: _barbers.isEmpty
               ? Center(
                   child: Column(mainAxisSize: MainAxisSize.min, children: [
                     Icon(Icons.people_outline,
@@ -405,7 +472,18 @@ class _ManageBarbersScreenState extends State<ManageBarbersScreen> {
                       ]),
                     );
                   },
-                ),
+                ),     // ListView.separated
+              ),       // Expanded
+            ],         // Column children
+          ),           // Column
+    );
+  }
+
+  void _showUpgradePrompt() {
+    final limit = _maxBarbers >= 999999 ? 'unlimited' : '$_maxBarbers';
+    AppSnackbar.warning(
+      context,
+      '$_planLabel plan allows up to $limit barber${_maxBarbers == 1 ? '' : 's'}. Upgrade your plan to add more.',
     );
   }
 }

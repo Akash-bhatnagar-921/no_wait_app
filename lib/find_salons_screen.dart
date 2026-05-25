@@ -7,6 +7,7 @@ import 'widgets/app_snackbar.dart';
 import 'widgets/error_retry.dart';
 import 'widgets/loading_widget.dart';
 import 'widgets/star_rating.dart';
+import 'widgets/salon_thumb.dart';
 import 'salon_detail_screen.dart';
 
 // ─── Sort options ─────────────────────────────────────────────────────────────
@@ -135,13 +136,36 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
       }
     });
 
-    final ok = isWishlisted
-        ? await ApiService.removeFromWishlist(salonId)
-        : await ApiService.addToWishlist(salonId);
-
-    if (!mounted) return;
-    if (!ok) {
-      // Revert on failure
+    try {
+      if (isWishlisted) {
+        await ApiService.removeFromWishlist(salonId);
+      } else {
+        await ApiService.addToWishlist(salonId);
+      }
+      if (!mounted) return;
+      AppSnackbar.success(
+        context,
+        isWishlisted ? 'Removed from wishlist' : 'Added to wishlist',
+      );
+    } on ApiException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        if (isWishlisted) {
+          _wishlistIds.add(salonId);
+        } else {
+          _wishlistIds.remove(salonId);
+        }
+      });
+      if (e.message.contains('WISHLIST_LIMIT')) {
+        AppSnackbar.warning(
+          context,
+          'Wishlist limit reached (10 salons). Upgrade to Basic or Pro for unlimited wishlist.',
+        );
+      } else {
+        AppSnackbar.error(context, 'Could not update wishlist. Try again.');
+      }
+    } catch (_) {
+      if (!mounted) return;
       setState(() {
         if (isWishlisted) {
           _wishlistIds.add(salonId);
@@ -150,11 +174,6 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
         }
       });
       AppSnackbar.error(context, 'Could not update wishlist. Try again.');
-    } else {
-      AppSnackbar.success(
-        context,
-        isWishlisted ? 'Removed from wishlist' : 'Added to wishlist',
-      );
     }
   }
 
@@ -451,6 +470,7 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
     final reviews    = (salon['reviewCount']   as num?)?.toInt()   ?? 0;
     final services   = (salon['services']      as List?)?.cast<String>() ?? [];
     final amenities  = (salon['amenities']     as List?)?.cast<String>() ?? [];
+    final featured   = salon['featured']       as bool? ?? false;
     final isWishlisted = _wishlistIds.contains(salonId);
 
     final locationStr = [address, city]
@@ -487,14 +507,7 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
         children: [
           // Name row
           Row(children: [
-            Container(
-              width: 44, height: 44,
-              decoration: BoxDecoration(
-                color: primary.withValues(alpha: 0.1),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.content_cut, color: primary, size: 22),
-            ),
+            SalonThumb(imageUrl: salon['image'] as String?, size: 44, primary: primary),
             const SizedBox(width: 12),
             Expanded(
               child: Column(
@@ -504,6 +517,30 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
                       style: const TextStyle(
                           fontSize: 16, fontWeight: FontWeight.bold),
                       maxLines: 1, overflow: TextOverflow.ellipsis),
+                  if (featured) ...[
+                    const SizedBox(height: 3),
+                    Row(children: [
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.shade50,
+                          borderRadius: BorderRadius.circular(6),
+                          border: Border.all(color: Colors.amber.shade300),
+                        ),
+                        child: Row(mainAxisSize: MainAxisSize.min, children: [
+                          Icon(Icons.verified_outlined,
+                              size: 11, color: Colors.amber.shade700),
+                          const SizedBox(width: 3),
+                          Text('Featured',
+                              style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.amber.shade800,
+                                  fontWeight: FontWeight.w600)),
+                        ]),
+                      ),
+                    ]),
+                  ],
                   const SizedBox(height: 2),
                   StarRating(rating: rating, reviewCount: reviews,
                       compact: true, starSize: 13),

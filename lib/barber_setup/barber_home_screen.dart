@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
-    show FilteringTextInputFormatter, HapticFeedback, LengthLimitingTextInputFormatter;
+    show FilteringTextInputFormatter, HapticFeedback, LengthLimitingTextInputFormatter, SystemNavigator;
+import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:intl/intl.dart';
 import 'package:no_wait_app/main.dart';
 import 'package:no_wait_app/services/api_service.dart';
@@ -12,6 +13,7 @@ import 'package:no_wait_app/map_screen.dart';
 import 'package:no_wait_app/services/location_prefs.dart';
 import 'professional_services_screen.dart';
 import 'manage_barbers_screen.dart';
+import 'manage_offers_screen.dart';
 import 'package:no_wait_app/settings_screen.dart';
 
 double _asDouble(dynamic value, [double fallback = 0.0]) {
@@ -108,6 +110,10 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
         _salonStats = stats;
         _myReviews  = reviewsRaw.cast<Map<String, dynamic>>();
         final todayRaw = allBookings.where((b) {
+          final status = b['status'] as String? ?? '';
+          if (status == 'cancelled' || status == 'rejected' || status == 'completed') {
+            return false;
+          }
           final dt = DateTime.tryParse(b['scheduledAt'] as String? ?? '');
           if (dt == null) return false;
           final local = dt.toLocal();
@@ -208,9 +214,43 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
 
   // ── Navigation ─────────────────────────────────────────────────────────────
 
+  Future<bool> _onWillPop() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Exit App?', style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text('Do you want to exit the app?'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade400,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Exit'),
+          ),
+        ],
+      ),
+    );
+    return confirmed == true;
+  }
+
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, _) async {
+        if (didPop) return;
+        final shouldExit = await _onWillPop();
+        if (shouldExit) SystemNavigator.pop();
+      },
+      child: Scaffold(
       backgroundColor: const Color(0xFFF5F7F2),
       bottomNavigationBar: BottomNavigationBar(
         currentIndex: _currentIndex,
@@ -247,6 +287,8 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
               icon: Icon(Icons.currency_rupee), label: 'Earnings'),
           const BottomNavigationBarItem(
               icon: Icon(Icons.person_outline), label: 'Profile'),
+          const BottomNavigationBarItem(
+              icon: Icon(Icons.workspace_premium_outlined), label: 'Subscription'),
         ],
       ),
       body: SafeArea(
@@ -254,7 +296,8 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
             ? const AppLoadingIndicator(message: 'Loading dashboard…')
             : _buildBody(),
       ),
-    );
+    ), // Scaffold
+    ); // PopScope
   }
 
   Widget _buildBody() {
@@ -267,6 +310,8 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
         return const _EarningsTab();
       case 3:
         return _profilePage();
+      case 4:
+        return _subscriptionsPage();
       default:
         return _homePage();
     }
@@ -372,6 +417,35 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
           // ── Salon card ─────────────────────────────────────────────────
           _salonCard(),
 
+          // ── Pending approval notice (shown until admin approves) ───────
+          if ((_salon?['status'] as String?) == 'pending') ...[
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              decoration: BoxDecoration(
+                color: Colors.amber.shade50,
+                borderRadius: BorderRadius.circular(14),
+                border: Border.all(color: Colors.amber.shade300),
+              ),
+              child: Row(children: [
+                Icon(Icons.hourglass_top_rounded,
+                    color: Colors.amber.shade700, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Your salon is pending admin approval. '
+                    'It will not appear in customer searches until approved. '
+                    'Pull down on Profile to check for updates.',
+                    style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.amber.shade900,
+                        height: 1.4),
+                  ),
+                ),
+              ]),
+            ),
+          ],
+
           // ── Closing-time reminder banner ───────────────────────────────
           if (_showClosingReminder) ...[
             const SizedBox(height: 16),
@@ -418,14 +492,14 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
               _statChip(
                 Icons.calendar_today_outlined,
                 '${_asInt(_salonStats['todayBookings'])}',
-                'Today\'s Bookings',
+                'Active Today',
                 Colors.blue.shade600,
               ),
               const SizedBox(width: 12),
               _statChip(
-                Icons.currency_rupee,
-                '₹${_asDouble(_salonStats['todayRevenue']).toStringAsFixed(0)}',
-                'Today\'s Revenue',
+                Icons.check_circle_outline,
+                '${_asInt(_salonStats['completedToday'])}',
+                'Completed',
                 Colors.green.shade700,
               ),
               const SizedBox(width: 12),
@@ -434,6 +508,15 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
                 '${_asInt(_salonStats['pendingCount'])}',
                 'Pending',
                 Colors.orange.shade600,
+              ),
+            ]),
+            const SizedBox(height: 8),
+            Row(children: [
+              _statChip(
+                Icons.currency_rupee,
+                '₹${_asDouble(_salonStats['todayRevenue']).toStringAsFixed(0)}',
+                'Today\'s Revenue',
+                Colors.purple.shade600,
               ),
             ]),
             const SizedBox(height: 20),
@@ -502,6 +585,15 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
                   MaterialPageRoute(
                       builder: (_) => const ManageBarbersScreen()),
                 ).then((_) => _fetchData()),
+              ),
+              actionCard(
+                icon: Icons.local_offer_outlined,
+                title: 'Offers',
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ManageOffersScreen()),
+                ),
               ),
               actionCard(
                   icon: Icons.content_cut,
@@ -850,7 +942,10 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
     final workingDaysList =
         (_salon?['workingDays'] as String?)?.split(',') ?? [];
 
-    return SingleChildScrollView(
+    return RefreshIndicator(
+      onRefresh: _fetchData,
+      child: SingleChildScrollView(
+      physics: const AlwaysScrollableScrollPhysics(),
       padding:
           EdgeInsets.symmetric(horizontal: isTablet ? 60 : 18, vertical: 24),
       child: Column(
@@ -1119,6 +1214,12 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
                         .toList(),
                   ),
                 ],
+
+                // ── Services ─────────────────────────────────────────────────
+                _buildProfileServices(),
+
+                // ── Amenities ────────────────────────────────────────────────
+                _buildProfileAmenities(),
               ],
             ),
           ),
@@ -1151,6 +1252,22 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
 
           const SizedBox(height: 20),
         ],
+      ),
+    ), // SingleChildScrollView
+    ); // RefreshIndicator
+  }
+
+  // ── SUBSCRIPTIONS PAGE ─────────────────────────────────────────────────────
+
+  Widget _subscriptionsPage() {
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    return SingleChildScrollView(
+      padding: EdgeInsets.symmetric(
+          horizontal: isTablet ? 48 : 18, vertical: 24),
+      child: _ProSubscriptionCard(
+        salonName: _salonName,
+        phone: _managerPhone,
+        email: _managerEmail,
       ),
     );
   }
@@ -1267,6 +1384,127 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
     );
   }
 
+  // ── Profile: Services list ────────────────────────────────────────────────
+
+  Widget _buildProfileServices() {
+    final services = (_salon?['services'] as List?) ?? [];
+    if (services.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        Row(
+          children: [
+            const Icon(Icons.content_cut, size: 16, color: Colors.grey),
+            const SizedBox(width: 8),
+            const Text(
+              'Services',
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500),
+            ),
+            const Spacer(),
+            GestureDetector(
+              onTap: () async {
+                final updated = await Navigator.push<bool>(
+                  context,
+                  MaterialPageRoute(
+                      builder: (_) => const ProfessionalServicesScreen()),
+                );
+                if (updated == true) _fetchData();
+              },
+              child: Text(
+                'Edit',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.green.shade700,
+                    fontWeight: FontWeight.w500),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: services.map((s) {
+            final svc   = s as Map<String, dynamic>;
+            final name  = svc['name'] as String? ?? '';
+            final price = (svc['price'] as num?)?.toStringAsFixed(0) ?? '0';
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.green.shade50,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.green.shade200),
+              ),
+              child: Text(
+                '$name  ₹$price',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.green.shade800,
+                    fontWeight: FontWeight.w500),
+              ),
+            );
+          }).toList(),
+        ),
+      ],
+    );
+  }
+
+  // ── Profile: Amenities list ───────────────────────────────────────────────
+
+  Widget _buildProfileAmenities() {
+    final amenities = (_salon?['amenities'] as List?) ?? [];
+    if (amenities.isEmpty) return const SizedBox.shrink();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Divider(height: 24),
+        Row(
+          children: [
+            const Icon(Icons.star_outline, size: 16, color: Colors.grey),
+            const SizedBox(width: 8),
+            const Text(
+              'Amenities',
+              style: TextStyle(
+                  color: Colors.grey,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w500),
+            ),
+          ],
+        ),
+        const SizedBox(height: 10),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: amenities.map((a) {
+            final name = a is String ? a : (a as Map?)?['name']?.toString() ?? '';
+            return Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+              decoration: BoxDecoration(
+                color: Colors.blue.shade50,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.blue.shade200),
+              ),
+              child: Text(
+                name,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: Colors.blue.shade800,
+                    fontWeight: FontWeight.w500),
+              ),
+            );
+          }).toList(),
+        ),
+        const SizedBox(height: 4),
+      ],
+    );
+  }
+
   Widget _infoRow(IconData icon, String label, String value) {
     return Padding(
       padding: const EdgeInsets.only(bottom: 12),
@@ -1349,6 +1587,8 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
       case 'in_progress': statusColor = Colors.green.shade600;  statusLabel = 'In Progress'; break;
       case 'completed':   statusColor = Colors.grey.shade500;   statusLabel = 'Completed';   break;
       case 'rejected':    statusColor = Colors.red.shade400;    statusLabel = 'Rejected';    break;
+      case 'cancelled':   statusColor = Colors.red.shade400;    statusLabel = 'Cancelled';   break;
+      case 'expired':     statusColor = Colors.brown.shade400;  statusLabel = 'Expired';     break;
       default:            statusColor = Colors.grey;            statusLabel = status;
     }
 
@@ -3045,6 +3285,690 @@ class _EarningsTabState extends State<_EarningsTab> {
                 fontSize: 15,
                 fontWeight: FontWeight.bold,
                 color: Colors.green.shade700)),
+      ]),
+    );
+  }
+}
+
+// ── Professional plan data ────────────────────────────────────────────────────
+
+class _ProFeature {
+  final String text;
+  final IconData icon;
+  const _ProFeature(this.text, this.icon);
+}
+
+class _ProPlan {
+  final String id;
+  final String title;
+  final int priceRs;
+  final IconData icon;
+  final List<_ProFeature> features;
+  final bool highlighted;
+  final Color color;
+  const _ProPlan({
+    required this.id,
+    required this.title,
+    required this.priceRs,
+    required this.icon,
+    required this.features,
+    required this.color,
+    this.highlighted = false,
+  });
+}
+
+const _proPlans = [
+  _ProPlan(
+    id: 'free',
+    title: 'Free',
+    priceRs: 0,
+    color: Color(0xFF9E9E9E),
+    icon: Icons.storefront_outlined,
+    features: [
+      _ProFeature('1 barber listed', Icons.person_outline),
+      _ProFeature('Up to 50 bookings/month', Icons.event_available_outlined),
+      _ProFeature('Standard listing visibility', Icons.visibility_outlined),
+      _ProFeature('Basic booking management', Icons.calendar_today_outlined),
+    ],
+  ),
+  _ProPlan(
+    id: 'professional_starter',
+    title: 'Starter',
+    priceRs: 299,
+    color: Color(0xFF2196F3),
+    icon: Icons.star_outline,
+    features: [
+      _ProFeature('Up to 3 barbers', Icons.people_outline),
+      _ProFeature('Unlimited bookings', Icons.all_inclusive),
+      _ProFeature('Basic analytics & reports', Icons.bar_chart_outlined),
+      _ProFeature('Booking reminders & alerts', Icons.notifications_outlined),
+      _ProFeature('Email support (24–48 hr)', Icons.mail_outline),
+    ],
+  ),
+  _ProPlan(
+    id: 'professional_growth',
+    title: 'Growth',
+    priceRs: 599,
+    color: Color(0xFF9C27B0),
+    icon: Icons.trending_up_outlined,
+    features: [
+      _ProFeature('Up to 10 barbers', Icons.people_outline),
+      _ProFeature('Priority listing placement', Icons.flash_on_outlined),
+      _ProFeature('Advanced analytics & insights', Icons.analytics_outlined),
+      _ProFeature('Priority customer support', Icons.headset_mic_outlined),
+      _ProFeature('Custom booking reminders', Icons.notifications_active_outlined),
+    ],
+  ),
+  _ProPlan(
+    id: 'professional_premium',
+    title: 'Premium',
+    priceRs: 999,
+    color: Color(0xFFFF8F00),
+    highlighted: true,
+    icon: Icons.workspace_premium_outlined,
+    features: [
+      _ProFeature('Everything in Growth', Icons.check_circle_outline),
+      _ProFeature('Unlimited barbers', Icons.people_outline),
+      _ProFeature('Featured salon badge', Icons.verified_outlined),
+      _ProFeature('Full analytics + revenue reports', Icons.assessment_outlined),
+      _ProFeature('Dedicated priority support', Icons.support_agent_outlined),
+      _ProFeature('Early access to new features', Icons.new_releases_outlined),
+    ],
+  ),
+];
+
+// ── Professional Subscription Card ───────────────────────────────────────────
+
+class _ProSubscriptionCard extends StatefulWidget {
+  final String salonName;
+  final String phone;
+  final String email;
+  const _ProSubscriptionCard({
+    required this.salonName,
+    this.phone = '',
+    this.email = '',
+  });
+
+  @override
+  State<_ProSubscriptionCard> createState() => _ProSubscriptionCardState();
+}
+
+class _ProSubscriptionCardState extends State<_ProSubscriptionCard> {
+  Map<String, dynamic>? _sub;
+  bool _loading = true;
+  bool _cancelling = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _load();
+  }
+
+  Future<void> _load() async {
+    setState(() => _loading = true);
+    final data = await ApiService.getProfessionalSubscription();
+    if (mounted) setState(() { _sub = data; _loading = false; });
+  }
+
+  String _planLabel(String? plan) {
+    switch (plan) {
+      case 'professional_starter': return 'Starter';
+      case 'professional_growth':  return 'Growth';
+      case 'professional_premium': return 'Premium';
+      default: return 'Free';
+    }
+  }
+
+  bool get _isOnPaidPlan {
+    final plan = _sub?['plan'] as String? ?? 'free';
+    return plan.startsWith('professional_');
+  }
+
+  String get _expiryLabel {
+    final exp = _sub?['expiresAt'] as String?;
+    if (exp == null) return '';
+    final dt = DateTime.tryParse(exp);
+    if (dt == null) return '';
+    final now = DateTime.now();
+    final diff = dt.difference(now).inDays;
+    if (diff <= 0) return 'Expires today';
+    if (diff == 1) return 'Expires tomorrow';
+    return 'Expires ${DateFormat('d MMM yyyy').format(dt)}';
+  }
+
+  Future<void> _subscribe(_ProPlan plan) async {
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
+    final ok = await showModalBottomSheet<bool>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      constraints: isTablet
+          ? const BoxConstraints(maxWidth: 540)
+          : const BoxConstraints(),
+      builder: (_) => _ProPaymentSheet(
+        planKey: plan.id,
+        planLabel: plan.title,
+        phone: widget.phone,
+        email: widget.email,
+      ),
+    );
+    if (ok == true && mounted) {
+      await _load();
+      if (mounted) AppSnackbar.success(context, '${plan.title} plan activated!');
+    }
+  }
+
+  Future<void> _cancelPlan() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Cancel Subscription',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Text(
+          'Your ${_planLabel(_sub?['plan'] as String?)} plan will revert to Free immediately.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('No', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: Colors.red.shade400,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('Yes, Cancel'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !mounted) return;
+
+    setState(() => _cancelling = true);
+    try {
+      await ApiService.cancelSubscription();
+      if (mounted) {
+        AppSnackbar.info(context, 'Subscription cancelled. You are now on the Free plan.');
+        await _load();
+        if (mounted) setState(() => _cancelling = false);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => _cancelling = false);
+        AppSnackbar.error(context, 'Failed to cancel. Please try again.');
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_loading) {
+      return const SizedBox(
+        height: 120,
+        child: Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    final currentPlan = _sub?['plan'] as String? ?? 'free';
+    const primary = Color(0xFFFF8F00);
+
+    return Column(children: [
+      // ── Header ───────────────────────────────────────────────────────────
+      const Text('Choose Your Plan',
+          style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold),
+          textAlign: TextAlign.center),
+      const SizedBox(height: 6),
+      const Text(
+        'Grow your salon business with the right tools.',
+        style: TextStyle(color: Colors.grey),
+        textAlign: TextAlign.center,
+      ),
+
+      // ── Active plan badge ─────────────────────────────────────────────────
+      if (_isOnPaidPlan) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+          decoration: BoxDecoration(
+            color: primary.withValues(alpha: 0.07),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: primary.withValues(alpha: 0.2)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.verified_outlined, color: primary, size: 18),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Active: ${_planLabel(currentPlan)} Plan',
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700,
+                        color: primary,
+                        fontSize: 13),
+                  ),
+                  if (_expiryLabel.isNotEmpty)
+                    Text(_expiryLabel,
+                        style: TextStyle(
+                            fontSize: 11,
+                            color: Colors.grey.shade600)),
+                ],
+              ),
+            ),
+            if (_cancelling)
+              const SizedBox(
+                width: 18, height: 18,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else
+              GestureDetector(
+                onTap: _cancelPlan,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 4),
+                  decoration: BoxDecoration(
+                    color: Colors.red.shade50,
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.red.shade200),
+                  ),
+                  child: Text('Cancel',
+                      style: TextStyle(
+                          fontSize: 11,
+                          color: Colors.red.shade600,
+                          fontWeight: FontWeight.w600)),
+                ),
+              ),
+          ]),
+        ),
+      ],
+
+      const SizedBox(height: 20),
+
+      // ── Plan cards ────────────────────────────────────────────────────────
+      ..._proPlans.map((p) => Padding(
+            padding: const EdgeInsets.only(bottom: 16),
+            child: _ProPlanCard(
+              plan: p,
+              isCurrent: p.id == currentPlan,
+              onSubscribe: () => _subscribe(p),
+            ),
+          )),
+
+      const SizedBox(height: 8),
+    ]);
+  }
+}
+
+// ── Professional Plan Card ────────────────────────────────────────────────────
+
+class _ProPlanCard extends StatelessWidget {
+  final _ProPlan plan;
+  final bool isCurrent;
+  final VoidCallback onSubscribe;
+  const _ProPlanCard({
+    required this.plan,
+    required this.isCurrent,
+    required this.onSubscribe,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hl = plan.highlighted;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(20),
+      decoration: BoxDecoration(
+        color: hl ? plan.color : Colors.white,
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: hl
+              ? plan.color
+              : isCurrent
+                  ? plan.color.withValues(alpha: 0.5)
+                  : Colors.grey.shade200,
+          width: isCurrent ? 1.5 : 1,
+        ),
+        boxShadow: hl
+            ? [
+                BoxShadow(
+                    color: plan.color.withValues(alpha: 0.25),
+                    blurRadius: 18,
+                    offset: const Offset(0, 6))
+              ]
+            : [],
+      ),
+      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+        // ── Title row ──────────────────────────────────────────────────
+        Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Row(children: [
+            Icon(plan.icon,
+                size: 22,
+                color: hl ? Colors.white : plan.color),
+            const SizedBox(width: 8),
+            Text(plan.title,
+                style: TextStyle(
+                    fontSize: 20,
+                    fontWeight: FontWeight.bold,
+                    color: hl ? Colors.white : Colors.black)),
+          ]),
+          if (hl)
+            _badge('POPULAR', Colors.white.withValues(alpha: 0.25), Colors.white)
+          else if (isCurrent)
+            _badge('CURRENT', plan.color.withValues(alpha: 0.12), plan.color),
+        ]),
+        const SizedBox(height: 8),
+
+        // ── Price ──────────────────────────────────────────────────────
+        RichText(
+          text: TextSpan(
+            style: TextStyle(color: hl ? Colors.white : Colors.black),
+            children: [
+              TextSpan(
+                  text: plan.priceRs == 0 ? '₹0' : '₹${plan.priceRs}',
+                  style: const TextStyle(
+                      fontSize: 32, fontWeight: FontWeight.bold)),
+              TextSpan(
+                  text: plan.priceRs == 0 ? ' forever' : ' / month',
+                  style: TextStyle(
+                      fontSize: 14,
+                      color: hl ? Colors.white70 : Colors.grey)),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+        Divider(
+            color: hl
+                ? Colors.white.withValues(alpha: 0.3)
+                : Colors.grey.shade200),
+        const SizedBox(height: 12),
+
+        // ── Features ───────────────────────────────────────────────────
+        ...plan.features.map((f) => Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: Row(children: [
+                Container(
+                  width: 28,
+                  height: 28,
+                  decoration: BoxDecoration(
+                    color: hl
+                        ? Colors.white.withValues(alpha: 0.15)
+                        : plan.color.withValues(alpha: 0.1),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(f.icon,
+                      size: 15,
+                      color: hl ? Colors.white : plan.color),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(f.text,
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: hl ? Colors.white : Colors.black87)),
+                ),
+              ]),
+            )),
+        const SizedBox(height: 14),
+
+        // ── CTA button ─────────────────────────────────────────────────
+        SizedBox(
+          width: double.infinity,
+          height: 46,
+          child: ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: hl
+                  ? Colors.white
+                  : isCurrent
+                      ? Colors.grey.shade100
+                      : plan.color,
+              foregroundColor: hl
+                  ? plan.color
+                  : isCurrent
+                      ? Colors.grey
+                      : Colors.white,
+              elevation: 0,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12)),
+            ),
+            onPressed: (isCurrent || plan.priceRs == 0) ? null : onSubscribe,
+            child: Text(
+              isCurrent
+                  ? 'Current Plan'
+                  : plan.priceRs == 0
+                      ? 'Free'
+                      : 'Get ${plan.title}',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+          ),
+        ),
+      ]),
+    );
+  }
+
+  Widget _badge(String label, Color bg, Color fg) => Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        decoration:
+            BoxDecoration(color: bg, borderRadius: BorderRadius.circular(20)),
+        child: Text(label,
+            style: TextStyle(
+                color: fg,
+                fontSize: 11,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1)),
+      );
+}
+
+// ── Professional plan payment sheet ──────────────────────────────────────────
+
+class _ProPaymentSheet extends StatefulWidget {
+  final String planKey;
+  final String planLabel;
+  final String phone;
+  final String email;
+  const _ProPaymentSheet({
+    required this.planKey,
+    required this.planLabel,
+    this.phone = '',
+    this.email = '',
+  });
+
+  @override
+  State<_ProPaymentSheet> createState() => _ProPaymentSheetState();
+}
+
+enum _PayState { loading, ready, success, error }
+
+class _ProPaymentSheetState extends State<_ProPaymentSheet> {
+  late final Razorpay _razorpay;
+  _PayState _state   = _PayState.loading;
+  String _errorMsg   = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _razorpay = Razorpay();
+    _razorpay.on(Razorpay.EVENT_PAYMENT_SUCCESS, _onSuccess);
+    _razorpay.on(Razorpay.EVENT_PAYMENT_ERROR,   _onError);
+    _razorpay.on(Razorpay.EVENT_EXTERNAL_WALLET, _onWallet);
+    _openCheckout();
+  }
+
+  @override
+  void dispose() {
+    _razorpay.clear();
+    super.dispose();
+  }
+
+  Future<void> _openCheckout() async {
+    setState(() { _state = _PayState.loading; _errorMsg = ''; });
+    try {
+      final order = await ApiService.createSubscriptionOrder(widget.planKey);
+      if (!mounted) return;
+      _razorpay.open({
+        'key':         order['keyId'],
+        'amount':      order['amount'],
+        'currency':    order['currency'] ?? 'INR',
+        'order_id':    order['orderId'],
+        'name':        'Baari Professional',
+        'description': '${widget.planLabel} Plan — salon subscription',
+        'prefill':     {'contact': widget.phone, 'email': widget.email},
+        'theme':       {'color': '#2D9248'},
+      });
+      if (mounted) setState(() => _state = _PayState.ready);
+    } on ApiException catch (e) {
+      if (mounted) setState(() { _state = _PayState.error; _errorMsg = e.message; });
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          _state    = _PayState.error;
+          _errorMsg = 'Could not start payment. Please try again.';
+        });
+      }
+    }
+  }
+
+  void _onSuccess(PaymentSuccessResponse r) async {
+    setState(() => _state = _PayState.loading);
+    try {
+      await ApiService.createSubscription(
+        widget.planKey,
+        paymentId: r.paymentId,
+        orderId:   r.orderId,
+        signature: r.signature,
+      );
+      if (!mounted) return;
+      setState(() => _state = _PayState.success);
+      await Future.delayed(const Duration(milliseconds: 900));
+      if (mounted) Navigator.pop(context, true);
+    } on ApiException catch (e) {
+      if (mounted) setState(() { _state = _PayState.error; _errorMsg = e.message; });
+    }
+  }
+
+  void _onError(PaymentFailureResponse r) {
+    if (!mounted) return;
+    // Code 0 = user dismissed the Razorpay screen ("Yes, exit") — close quietly.
+    if (r.code == 0) {
+      Navigator.pop(context, false);
+      return;
+    }
+    final msg = r.message ?? '';
+    setState(() {
+      _state    = _PayState.error;
+      _errorMsg = (msg.isEmpty || msg == 'undefined')
+          ? 'Payment was not completed. Please try again.'
+          : msg;
+    });
+  }
+
+  void _onWallet(ExternalWalletResponse r) {
+    if (mounted) {
+      setState(() {
+        _state    = _PayState.error;
+        _errorMsg = 'External wallet is not supported. Use card or UPI.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final hPad = isTablet ? 48.0 : 24.0;
+    final primary = Colors.green.shade700;
+    return Container(
+      constraints: BoxConstraints(maxHeight: size.height * 0.65),
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 36),
+      child: Column(mainAxisSize: MainAxisSize.min, children: [
+        Center(
+          child: Container(
+            width: 40, height: 4,
+            decoration: BoxDecoration(
+                color: Colors.grey.shade300,
+                borderRadius: BorderRadius.circular(2)),
+          ),
+        ),
+        const SizedBox(height: 20),
+        if (_state == _PayState.loading) ...[
+          const CircularProgressIndicator(color: Color(0xFF2D9248)),
+          const SizedBox(height: 16),
+          const Text('Opening secure payment…',
+              style: TextStyle(color: Colors.grey)),
+        ] else if (_state == _PayState.ready) ...[
+          Icon(Icons.lock_outline, color: primary, size: 36),
+          const SizedBox(height: 12),
+          Text('${widget.planLabel} Plan',
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 6),
+          const Text('Razorpay checkout opened above.',
+              style: TextStyle(color: Colors.grey, fontSize: 13)),
+        ] else if (_state == _PayState.success) ...[
+          Container(
+            width: 56, height: 56,
+            decoration: BoxDecoration(
+              color: Colors.green.shade50, shape: BoxShape.circle),
+            child: Icon(Icons.check_rounded, color: primary, size: 30),
+          ),
+          const SizedBox(height: 12),
+          Text('${widget.planLabel} Plan Activated!',
+              style: const TextStyle(
+                  fontSize: 17, fontWeight: FontWeight.bold)),
+        ] else ...[
+          Icon(Icons.error_outline, color: Colors.red.shade400, size: 36),
+          const SizedBox(height: 12),
+          const Text('Payment Failed',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(height: 8),
+          Text(_errorMsg,
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 13)),
+          const SizedBox(height: 20),
+          Center(
+            child: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: isTablet ? 380 : double.infinity),
+              child: Row(children: [
+                Expanded(
+                  child: OutlinedButton(
+                    onPressed: () => Navigator.pop(context, false),
+                    style: OutlinedButton.styleFrom(
+                      side: BorderSide(color: Colors.grey.shade400),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text('Cancel',
+                        style: TextStyle(color: Colors.grey)),
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _openCheckout,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primary,
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12)),
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                    ),
+                    child: const Text('Retry',
+                        style: TextStyle(fontWeight: FontWeight.bold)),
+                  ),
+                ),
+              ]),
+            ),
+          ),
+        ],
+        const SizedBox(height: 8),
       ]),
     );
   }

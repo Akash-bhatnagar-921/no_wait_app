@@ -116,25 +116,62 @@ class _Step2ScreenState extends State<Step2Screen> {
   }
 
   Widget _mobileStepIndicator(int active) {
+    const primary = Color(0xFF6FCF97);
+    final labels = ['Salon Details', 'Services', 'Barbers'];
     return Row(
-      children: [
-        _circle(1, active),
-        const Expanded(child: Divider()),
-        _circle(2, active),
-        const Expanded(child: Divider()),
-        _circle(3, active),
-      ],
-    );
-  }
-
-  Widget _circle(int num, int active) {
-    return CircleAvatar(
-      radius: 12,
-      backgroundColor: num == active ? const Color(0xFF6FCF97) : Colors.grey,
-      child: Text(
-        "$num",
-        style: const TextStyle(fontSize: 12, color: Colors.white),
-      ),
+      children: List.generate(3, (i) {
+        final stepNum = i + 1;
+        final isActive = stepNum == active;
+        final isDone   = stepNum < active;
+        return Expanded(
+          child: Row(
+            children: [
+              if (i > 0)
+                Expanded(
+                  child: Container(
+                    height: 2,
+                    color: isDone ? primary : Colors.grey.shade300,
+                  ),
+                ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircleAvatar(
+                    radius: 14,
+                    backgroundColor:
+                        isActive || isDone ? primary : Colors.grey.shade300,
+                    child: isDone
+                        ? const Icon(Icons.check, size: 14, color: Colors.white)
+                        : Text('$stepNum',
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: isActive
+                                  ? Colors.white
+                                  : Colors.grey.shade600,
+                              fontWeight: FontWeight.bold,
+                            )),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(labels[i],
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: isActive ? primary : Colors.grey.shade500,
+                        fontWeight:
+                            isActive ? FontWeight.bold : FontWeight.normal,
+                      )),
+                ],
+              ),
+              if (i < 2)
+                Expanded(
+                  child: Container(
+                    height: 2,
+                    color: isDone ? primary : Colors.grey.shade300,
+                  ),
+                ),
+            ],
+          ),
+        );
+      }),
     );
   }
 
@@ -332,6 +369,30 @@ class _Step2ScreenState extends State<Step2Screen> {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        // ── Step heading ─────────────────────────────────────────────────
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
+          decoration: BoxDecoration(
+            color: const Color(0xFF6FCF97).withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: const Text(
+            'Step 2 of 3',
+            style: TextStyle(
+              color: Color(0xFF2D9248),
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ),
+        const SizedBox(height: 10),
+        const Text("Services & Working Hours",
+            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold)),
+        const SizedBox(height: 4),
+        Text("Set your hours and the services you offer.",
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade600)),
+        const SizedBox(height: 20),
+
         // ── Working Hours ──────────────────────────────────────────────────
         _workingHoursSection(context),
 

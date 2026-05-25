@@ -43,8 +43,9 @@ class _SalonCodeScreenState extends State<SalonCodeScreen> {
       await ApiService.verifySalonCode(phone: widget.phone, code: code);
 
       navigator.pop(); // dismiss loader
-      navigator.pushReplacement(
+      navigator.pushAndRemoveUntil(
         MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen()),
+        (route) => false,
       );
     } catch (e) {
       if (!mounted) return;

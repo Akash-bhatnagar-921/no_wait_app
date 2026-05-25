@@ -171,6 +171,10 @@ class _LoginScreenState extends State<LoginScreen> {
                 AppSnackbar.warning(context, 'Please enter your mobile number');
                 return;
               }
+              if (!RegExp(r'^\d{10}$').hasMatch(phone)) {
+                AppSnackbar.warning(context, 'Enter a valid 10-digit mobile number');
+                return;
+              }
 
               FocusScope.of(context).unfocus();
               showDialog(

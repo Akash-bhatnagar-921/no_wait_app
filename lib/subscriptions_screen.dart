@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
+import 'models/user_profile_model.dart';
 import 'services/api_service.dart';
 import 'widgets/app_snackbar.dart';
 
@@ -93,6 +94,8 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   bool _loading = true;
   bool _cancelling = false;
   int _monthlyUsed = 0;
+  String _userPhone = '';
+  String _userEmail = '';
 
   @override
   void initState() {
@@ -105,15 +108,19 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
     final results = await Future.wait([
       ApiService.getSubscription(),
       ApiService.getMonthlyBookingCount(),
+      ApiService.getProfile(),
     ]);
     if (mounted) {
-      final sub   = results[0] as Map<String, dynamic>;
-      final count = results[1] as int;
+      final sub     = results[0] as Map<String, dynamic>;
+      final count   = results[1] as int;
+      final profile = results[2] as UserProfileModel?;
       setState(() {
         _currentPlan  = sub['plan']?.toString() ?? 'free';
         final exp     = sub['expiresAt'];
         _expiresAt    = exp != null ? DateTime.tryParse(exp.toString()) : null;
         _monthlyUsed  = count;
+        _userPhone    = profile?.phone ?? '';
+        _userEmail    = profile?.email ?? '';
         _loading      = false;
       });
     }
@@ -131,11 +138,19 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   }
 
   Future<void> _subscribe(_Plan plan) async {
+    final isTablet = MediaQuery.of(context).size.shortestSide >= 600;
     final ok = await showModalBottomSheet<bool>(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => _PaymentSheet(plan: plan),
+      constraints: isTablet
+          ? const BoxConstraints(maxWidth: 540)
+          : const BoxConstraints(),
+      builder: (_) => _PaymentSheet(
+        plan: plan,
+        phone: _userPhone,
+        email: _userEmail,
+      ),
     );
     if (ok == true && mounted) {
       // Refresh to get updated expiresAt from backend
@@ -507,7 +522,9 @@ class _PlanCard extends StatelessWidget {
 
 class _PaymentSheet extends StatefulWidget {
   final _Plan plan;
-  const _PaymentSheet({required this.plan});
+  final String phone;
+  final String email;
+  const _PaymentSheet({required this.plan, this.phone = '', this.email = ''});
 
   @override
   State<_PaymentSheet> createState() => _PaymentSheetState();
@@ -550,7 +567,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
         'order_id':    order['orderId'],
         'name':        'Baari',
         'description': '${widget.plan.title} Plan · ₹${widget.plan.priceRs}/month',
-        'prefill':     {'contact': '', 'email': ''},
+        'prefill':     {'contact': widget.phone, 'email': widget.email},
         'theme':       {'color': '#2D9248'},
       });
       if (mounted) setState(() => _state = _PayState.ready);
@@ -593,11 +610,17 @@ class _PaymentSheetState extends State<_PaymentSheet> {
 
   void _onError(PaymentFailureResponse r) {
     if (!mounted) return;
+    // Code 0 = user dismissed the Razorpay screen ("Yes, exit") — close quietly.
+    if (r.code == 0) {
+      Navigator.pop(context, false);
+      return;
+    }
+    final msg = r.message ?? '';
     setState(() {
       _state    = _PayState.error;
-      _errorMsg = r.message?.isNotEmpty == true
-          ? r.message!
-          : 'Payment was not completed. Please try again.';
+      _errorMsg = (msg.isEmpty || msg == 'undefined')
+          ? 'Payment was not completed. Please try again.'
+          : msg;
     });
   }
 
@@ -615,19 +638,21 @@ class _PaymentSheetState extends State<_PaymentSheet> {
 
   @override
   Widget build(BuildContext context) {
+    final size = MediaQuery.of(context).size;
+    final isTablet = size.shortestSide >= 600;
+    final hPad = isTablet ? 48.0 : 24.0;
     return Container(
-      constraints: BoxConstraints(
-          maxHeight: MediaQuery.of(context).size.height * 0.70),
+      constraints: BoxConstraints(maxHeight: size.height * 0.70),
       decoration: const BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
       ),
-      padding: const EdgeInsets.fromLTRB(24, 20, 24, 36),
+      padding: EdgeInsets.fromLTRB(hPad, 20, hPad, 36),
       child: switch (_state) {
         _PayState.loading    => _buildLoading(),
         _PayState.ready      => _buildReady(),
         _PayState.success    => _buildSuccess(),
-        _PayState.error      => _buildError(),
+        _PayState.error      => _buildError(isTablet),
       },
     );
   }
@@ -684,7 +709,7 @@ class _PaymentSheetState extends State<_PaymentSheet> {
     ],
   );
 
-  Widget _buildError() => Column(
+  Widget _buildError([bool isTablet = false]) => Column(
     mainAxisSize: MainAxisSize.min,
     children: [
       _dragHandle(),
@@ -707,36 +732,41 @@ class _PaymentSheetState extends State<_PaymentSheet> {
         style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
       ),
       const SizedBox(height: 24),
-      Row(children: [
-        Expanded(
-          child: OutlinedButton(
-            onPressed: () => Navigator.pop(context, false),
-            style: OutlinedButton.styleFrom(
-              side: BorderSide(color: Colors.grey.shade400),
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
+      Center(
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: isTablet ? 380 : double.infinity),
+          child: Row(children: [
+            Expanded(
+              child: OutlinedButton(
+                onPressed: () => Navigator.pop(context, false),
+                style: OutlinedButton.styleFrom(
+                  side: BorderSide(color: Colors.grey.shade400),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('Cancel',
+                    style: TextStyle(color: Colors.grey)),
+              ),
             ),
-            child: const Text('Cancel',
-                style: TextStyle(color: Colors.grey)),
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: ElevatedButton(
-            onPressed: _openCheckout,
-            style: ElevatedButton.styleFrom(
-              backgroundColor: const Color(0xFF2D9248),
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(12)),
-              padding: const EdgeInsets.symmetric(vertical: 14),
+            const SizedBox(width: 12),
+            Expanded(
+              child: ElevatedButton(
+                onPressed: _openCheckout,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF2D9248),
+                  foregroundColor: Colors.white,
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12)),
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                ),
+                child: const Text('Retry',
+                    style: TextStyle(fontWeight: FontWeight.bold)),
+              ),
             ),
-            child: const Text('Retry',
-                style: TextStyle(fontWeight: FontWeight.bold)),
-          ),
-        ),
-      ]),
+          ]),        // Row
+        ),           // ConstrainedBox
+      ),             // Center
       const SizedBox(height: 8),
     ],
   );

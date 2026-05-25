@@ -29,7 +29,13 @@ class _WaitingScreenState extends State<WaitingScreen> {
     // _countdownTimer.cancel() if the deadline has already passed, which would
     // throw LateInitializationError on a 'late' field that isn't set yet.
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted) setState(() => _updateRemaining());
+      if (!mounted) return;
+      final wasNonZero = _remaining > Duration.zero;
+      setState(() => _updateRemaining());
+      // Timer just hit zero this tick → let the professional into the dashboard.
+      if (wasNonZero && _remaining == Duration.zero && mounted) {
+        _onReviewWindowExpired();
+      }
     });
 
     _pollTimer = Timer.periodic(const Duration(seconds: 30), (_) {
@@ -72,6 +78,21 @@ class _WaitingScreenState extends State<WaitingScreen> {
     }
   }
 
+  /// Called the moment the 24 h review window expires while the professional
+  /// is still on this screen. Navigates to the dashboard regardless of salon
+  /// approval status — the salon simply won't appear in customer searches until
+  /// an admin approves it.
+  void _onReviewWindowExpired() {
+    _pollTimer.cancel();
+    _countdownTimer.cancel();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const ProfessionalHomeScreen()),
+      (route) => false,
+    );
+  }
+
   @override
   void dispose() {
     _countdownTimer.cancel();
@@ -89,7 +110,7 @@ class _WaitingScreenState extends State<WaitingScreen> {
   void _showSupportSnackbar() {
     ScaffoldMessenger.of(context).showSnackBar(
       SnackBar(
-        duration: const Duration(seconds: 10),
+        duration: const Duration(seconds: 3),
         behavior: SnackBarBehavior.floating,
         margin: const EdgeInsets.all(16),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -117,13 +138,6 @@ class _WaitingScreenState extends State<WaitingScreen> {
               ),
             ),
           ],
-        ),
-        dismissDirection: DismissDirection.horizontal,
-        action: SnackBarAction(
-          label: '✕',
-          textColor: Colors.white70,
-          onPressed: () =>
-              ScaffoldMessenger.of(context).hideCurrentSnackBar(),
         ),
       ),
     );

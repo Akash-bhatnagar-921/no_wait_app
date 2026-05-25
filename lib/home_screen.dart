@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'find_salons_screen.dart';
 import 'map_screen.dart';
 import 'my_bookings_screen.dart';
+import 'subscriptions_screen.dart';
 import 'services/api_service.dart';
 import 'services/location_prefs.dart';
 import 'widgets/app_drawer.dart';
@@ -22,6 +23,8 @@ class _HomeScreenState extends State<HomeScreen> {
   Map<String, dynamic>? _activeBooking;
   int _monthlyBookingCount = 0;
   String _subscriptionPlan = '';
+  bool _loading = true;
+  bool _hasError = false;
 
   @override
   void initState() {
@@ -30,38 +33,41 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _loadSaved() async {
-    final results = await Future.wait([
-      LocationPrefs.loadLocation(),
-      LocationPrefs.loadDate(),
-      ApiService.getActiveBooking(),
-      ApiService.getMonthlyBookingCount(),
-      ApiService.getSubscription(),
-    ]);
+    setState(() { _loading = true; _hasError = false; });
+    try {
+      final results = await Future.wait([
+        LocationPrefs.loadLocation(),
+        LocationPrefs.loadDate(),
+        ApiService.getActiveBooking(),
+        ApiService.getMonthlyBookingCount(),
+        ApiService.getSubscription(),
+      ]);
 
-    final loc           = results[0] as SavedLocation?;
-    final savedDate     = results[1] as DateTime?;
-    final activeBooking = results[2] as Map<String, dynamic>?;
-    final monthlyCount  = results[3] as int;
-    final sub           = results[4] as Map<String, dynamic>;
-    // Use '' (not 'free') as the unknown-plan sentinel so an API failure
-    // never causes the free-plan banner to show for paid users.
-    final plan          = sub['plan']?.toString() ?? '';
+      final loc           = results[0] as SavedLocation?;
+      final savedDate     = results[1] as DateTime?;
+      final activeBooking = results[2] as Map<String, dynamic>?;
+      final monthlyCount  = results[3] as int;
+      final sub           = results[4] as Map<String, dynamic>;
+      final plan          = sub['plan']?.toString() ?? '';
 
-    // Discard a saved date that is already in the past
-    final today = DateTime.now();
-    final validDate = (savedDate != null &&
-            !savedDate.isBefore(DateTime(today.year, today.month, today.day)))
-        ? savedDate
-        : null;
+      final today = DateTime.now();
+      final validDate = (savedDate != null &&
+              !savedDate.isBefore(DateTime(today.year, today.month, today.day)))
+          ? savedDate
+          : null;
 
-    if (mounted) {
-      setState(() {
-        _location            = loc;
-        _date                = validDate;
-        _activeBooking       = activeBooking;
-        _monthlyBookingCount = monthlyCount;
-        _subscriptionPlan    = plan;
-      });
+      if (mounted) {
+        setState(() {
+          _location            = loc;
+          _date                = validDate;
+          _activeBooking       = activeBooking;
+          _monthlyBookingCount = monthlyCount;
+          _subscriptionPlan    = plan;
+          _loading             = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() { _loading = false; _hasError = true; });
     }
   }
 
@@ -107,6 +113,10 @@ class _HomeScreenState extends State<HomeScreen> {
       AppSnackbar.warning(context, 'Please select a location first.');
       return;
     }
+    if (_subscriptionPlan == 'free' && _monthlyBookingCount >= 2) {
+      _showBookingLimitDialog();
+      return;
+    }
     Navigator.push(
       context,
       MaterialPageRoute(
@@ -114,6 +124,45 @@ class _HomeScreenState extends State<HomeScreen> {
           location: _location!,
           date: _date ?? DateTime.now(),
         ),
+      ),
+    );
+  }
+
+  void _showBookingLimitDialog() {
+    final primary = Theme.of(context).colorScheme.primary;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text('Monthly Limit Reached',
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: const Text(
+          'You\'ve used your 2 free bookings this month.\n\nUpgrade to Basic or Pro for unlimited bookings every month.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Maybe Later',
+                style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                    builder: (_) => const SubscriptionsScreen()),
+              );
+            },
+            child: const Text('Upgrade Now'),
+          ),
+        ],
       ),
     );
   }
@@ -155,13 +204,59 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
       drawer: const AppDrawer(),
       body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: BoxConstraints(
-              maxWidth: isDesktop ? 900 : (isTablet ? 700 : double.infinity),
+        child: _loading
+            ? const Center(child: CircularProgressIndicator())
+            : _hasError
+                ? _errorView()
+                : Center(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        maxWidth: isDesktop ? 900 : (isTablet ? 700 : double.infinity),
+                      ),
+                      child: isTablet ? _tabletLayout() : _mobileLayout(),
+                    ),
+                  ),
+      ),
+    );
+  }
+
+  Widget _errorView() {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(Icons.wifi_off_rounded, size: 56, color: Colors.grey.shade400),
+            const SizedBox(height: 16),
+            const Text(
+              'Could not load data',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
             ),
-            child: isTablet ? _tabletLayout() : _mobileLayout(),
-          ),
+            const SizedBox(height: 8),
+            Text(
+              'Check your internet connection and try again.',
+              textAlign: TextAlign.center,
+              style: TextStyle(color: Colors.grey.shade600, fontSize: 14),
+            ),
+            const SizedBox(height: 28),
+            SizedBox(
+              height: 50,
+              child: ElevatedButton.icon(
+                icon: const Icon(Icons.refresh_rounded),
+                label: const Text('Retry'),
+                onPressed: _loadSaved,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: primary,
+                  foregroundColor: Colors.white,
+                  padding: const EdgeInsets.symmetric(horizontal: 32),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(14)),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

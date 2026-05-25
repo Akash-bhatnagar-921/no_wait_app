@@ -20,6 +20,7 @@ class BookingDetailScreen extends StatefulWidget {
 class _BookingDetailScreenState extends State<BookingDetailScreen> {
   late Map<String, dynamic> _booking;
   bool _cancelling = false;
+  bool _refreshing = false;
   late bool _localHasReview;
   Timer? _otpTimer;
   int _otpSecondsLeft = 0;
@@ -30,6 +31,33 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     _booking = Map<String, dynamic>.from(widget.booking);
     _localHasReview = _booking['hasReview'] == true;
     _startOtpCountdown();
+  }
+
+  Future<void> _refresh() async {
+    if (_refreshing) return;
+    setState(() => _refreshing = true);
+    try {
+      final result = await ApiService.getMyBookingsPaged(page: 1, limit: 50);
+      final list   = (result['bookings'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final id     = _booking['id'] as String?;
+      final updated = list.firstWhere(
+        (b) => b['id'] == id,
+        orElse: () => <String, dynamic>{},
+      );
+      if (updated.isNotEmpty && mounted) {
+        _otpTimer?.cancel();
+        setState(() {
+          _booking        = updated;
+          _localHasReview = updated['hasReview'] == true;
+          _refreshing     = false;
+        });
+        _startOtpCountdown();
+      } else {
+        if (mounted) setState(() => _refreshing = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _refreshing = false);
+    }
   }
 
   @override
@@ -239,6 +267,21 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
+        actions: [
+          _refreshing
+              ? const Padding(
+                  padding: EdgeInsets.all(14),
+                  child: SizedBox(
+                    width: 18, height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  ),
+                )
+              : IconButton(
+                  icon: const Icon(Icons.refresh_rounded),
+                  tooltip: 'Refresh status',
+                  onPressed: _refresh,
+                ),
+        ],
       ),
       body: SingleChildScrollView(
         padding: EdgeInsets.symmetric(

@@ -8,6 +8,7 @@ import 'widgets/app_snackbar.dart';
 import 'widgets/error_retry.dart';
 import 'widgets/loading_widget.dart';
 import 'widgets/star_rating.dart';
+import 'widgets/salon_thumb.dart';
 import 'booking_summary_screen.dart';
 
 class SalonDetailScreen extends StatefulWidget {
@@ -52,6 +53,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
   List<dynamic> get _services => (_detail?['services'] as List?) ?? [];
   List<dynamic> get _amenities => (_detail?['amenities'] as List?) ?? [];
   List<dynamic> _reviews = [];
+  List<dynamic> _offers  = [];
 
   @override
   void initState() {
@@ -67,6 +69,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
         ApiService.getSalonReviews(widget.salonId),
         ApiService.getMonthlyBookingCount(),
         ApiService.getSubscription(),
+        ApiService.getSalonOffers(widget.salonId),
       ]);
       if (mounted) {
         final monthlyCount = results[2] as int;
@@ -77,6 +80,7 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
           _detail           = results[0] as Map<String, dynamic>?;
           _reviews          = results[1] as List<dynamic>;
           _planLimitReached = plan == 'free' && monthlyCount >= 2;
+          _offers           = results[4] as List<dynamic>;
           _loading          = false;
         });
       }
@@ -196,6 +200,10 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
                             const SizedBox(height: 20),
                             _buildAmenitiesSection(),
                           ],
+                          if (_offers.isNotEmpty) ...[
+                            const SizedBox(height: 20),
+                            _buildOffersSection(),
+                          ],
                           if (_reviews.isNotEmpty) ...[
                             const SizedBox(height: 20),
                             _buildReviewsSection(),
@@ -236,13 +244,10 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(children: [
-            Container(
-              width: 48, height: 48,
-              decoration: BoxDecoration(
-                color: primary.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(Icons.content_cut, color: primary, size: 24),
+            SalonThumb(
+              imageUrl: _detail?['image'] as String?,
+              size: 48,
+              primary: primary,
             ),
             const SizedBox(width: 12),
             Expanded(
@@ -441,6 +446,95 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
             );
           }).toList(),
         ),
+      ],
+    );
+  }
+
+  // ── Offers section ──────────────────────────────────────────────────────────
+
+  Widget _buildOffersSection() {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(Icons.local_offer_outlined, size: 18, color: primary),
+          const SizedBox(width: 8),
+          const Text('Offers & Promotions',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        ]),
+        const SizedBox(height: 10),
+        ..._offers.map((o) {
+          final offer      = o as Map<String, dynamic>;
+          final title      = offer['title'] as String? ?? '';
+          final desc       = offer['description'] as String? ?? '';
+          final disc       = (offer['discountPercent'] as num?)?.toInt() ?? 0;
+          final validUntil = offer['validUntil'] != null
+              ? DateTime.tryParse(offer['validUntil'] as String)
+              : null;
+          return Container(
+            margin: const EdgeInsets.only(bottom: 10),
+            padding: const EdgeInsets.all(14),
+            decoration: BoxDecoration(
+              color: primary.withValues(alpha: 0.05),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: primary.withValues(alpha: 0.2)),
+            ),
+            child: Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+              Container(
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: primary.withValues(alpha: 0.1),
+                  shape: BoxShape.circle,
+                ),
+                child: Icon(Icons.local_offer_outlined, size: 16, color: primary),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(children: [
+                      Expanded(
+                        child: Text(title,
+                            style: const TextStyle(
+                                fontSize: 13, fontWeight: FontWeight.bold)),
+                      ),
+                      if (disc > 0)
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: primary,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text('$disc% OFF',
+                              style: const TextStyle(
+                                  fontSize: 11,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white)),
+                        ),
+                    ]),
+                    if (desc.isNotEmpty) ...[
+                      const SizedBox(height: 3),
+                      Text(desc,
+                          style: TextStyle(
+                              fontSize: 12, color: Colors.grey.shade600)),
+                    ],
+                    if (validUntil != null) ...[
+                      const SizedBox(height: 4),
+                      Text(
+                        'Valid till ${DateFormat('d MMM yyyy').format(validUntil)}',
+                        style: TextStyle(
+                            fontSize: 11, color: Colors.grey.shade500),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ]),
+          );
+        }),
       ],
     );
   }

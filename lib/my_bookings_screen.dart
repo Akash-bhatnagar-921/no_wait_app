@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import 'services/api_service.dart';
 import 'salon_detail_screen.dart';
@@ -20,26 +23,22 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
   List<Map<String, dynamic>> _bookings = [];
   bool _loading = true;
   bool _hasError = false;
+  int  _page    = 1;
+  bool _hasMore = false;
 
   // Track id→status across reloads to detect pending→confirmed transitions
   Map<String, String> _prevStatuses = {};
   List<Map<String, dynamic>> _newlyConfirmed = [];
 
+  // Rejection banner — shown once per rejected booking, auto-dismissed after 3 s
+  List<Map<String, dynamic>> _pendingRejectionBanner = [];
+  Set<String> _shownRejectionIds = {};
+  Timer? _rejectionTimer;
+
   List<Map<String, dynamic>> get _upcoming =>
       _bookings.where((b) => b['isUpcoming'] == true).toList();
   List<Map<String, dynamic>> get _past =>
       _bookings.where((b) => b['isUpcoming'] != true).toList();
-
-  // Recently rejected bookings (past 24 h) — alert the user to re-book
-  List<Map<String, dynamic>> get _recentlyRejected {
-    final cutoff = DateTime.now().subtract(const Duration(hours: 24));
-    return _bookings.where((b) {
-      if (b['status'] != 'rejected') return false;
-      final dt = DateTime.tryParse(b['updatedAt'] as String? ??
-          b['createdAt'] as String? ?? '');
-      return dt != null && dt.isAfter(cutoff);
-    }).toList();
-  }
 
   // Pending bookings waiting for professional acceptance
   List<Map<String, dynamic>> get _pendingBookings =>
@@ -61,14 +60,26 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
     WidgetsBinding.instance.addObserver(this);
-    _loadBookings();
+    _loadShownRejectionIds().then((_) => _loadBookings());
   }
 
   @override
   void dispose() {
+    _rejectionTimer?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     _tabController.dispose();
     super.dispose();
+  }
+
+  Future<void> _loadShownRejectionIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    final ids = prefs.getStringList('shown_rejection_ids') ?? [];
+    if (mounted) setState(() => _shownRejectionIds = Set.from(ids));
+  }
+
+  Future<void> _persistShownRejectionIds() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setStringList('shown_rejection_ids', _shownRejectionIds.toList());
   }
 
   // Auto-refresh when the user returns to the app
@@ -77,37 +88,72 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
     if (state == AppLifecycleState.resumed) _loadBookings();
   }
 
-  Future<void> _loadBookings() async {
-    setState(() { _loading = true; _hasError = false; });
+  Future<void> _loadBookings({bool loadMore = false}) async {
+    if (!loadMore) {
+      setState(() { _loading = true; _hasError = false; _page = 1; _hasMore = false; });
+    }
     try {
-      final raw = await ApiService.getMyBookings();
+      final result = await ApiService.getMyBookingsPaged(page: _page, limit: 20);
       if (!mounted) return;
 
-      final newBookings = raw.cast<Map<String, dynamic>>();
+      final newBookings = (result['bookings'] as List? ?? [])
+          .cast<Map<String, dynamic>>();
+      final pagination = result['pagination'] as Map<String, dynamic>? ?? {};
 
-      // Detect any booking that was 'pending' before and is now 'confirmed'
+      final combined = loadMore ? [..._bookings, ...newBookings] : newBookings;
+
+      // Detect pending→confirmed transitions
       final confirmed = newBookings.where((b) {
         final id     = b['id'] as String;
         final status = b['status'] as String? ?? '';
-        return status == 'confirmed' &&
-            _prevStatuses[id] == 'pending';
+        return status == 'confirmed' && _prevStatuses[id] == 'pending';
       }).toList();
 
-      // Build new status snapshot for the next comparison
       final nextStatuses = Map<String, String>.fromEntries(
-        newBookings.map((b) =>
+        combined.map((b) =>
             MapEntry(b['id'] as String, b['status'] as String? ?? '')),
       );
 
+      // Detect newly rejected bookings not yet shown to the user
+      List<Map<String, dynamic>> newRejected = [];
+      if (!loadMore) {
+        newRejected = combined
+            .where((b) =>
+                b['status'] == 'rejected' &&
+                !_shownRejectionIds.contains(b['id'] as String))
+            .toList();
+        if (newRejected.isNotEmpty) {
+          _shownRejectionIds = {
+            ..._shownRejectionIds,
+            ...newRejected.map((b) => b['id'] as String),
+          };
+          _persistShownRejectionIds();
+          _rejectionTimer?.cancel();
+          _rejectionTimer = Timer(const Duration(seconds: 3), () {
+            if (mounted) setState(() => _pendingRejectionBanner = []);
+          });
+        }
+      }
+
       setState(() {
-        _bookings       = newBookings;
-        _newlyConfirmed = confirmed;
-        _prevStatuses   = nextStatuses;
-        _loading        = false;
+        _bookings              = combined;
+        _newlyConfirmed        = loadMore ? _newlyConfirmed : confirmed;
+        _prevStatuses          = nextStatuses;
+        _loading               = false;
+        _hasMore               = pagination['hasMore'] == true;
+        if (!loadMore && newRejected.isNotEmpty) {
+          _pendingRejectionBanner = newRejected;
+        }
       });
     } catch (_) {
       if (mounted) setState(() { _loading = false; _hasError = true; });
     }
+  }
+
+  Future<void> _loadMore() async {
+    if (!_hasMore || _loading) return;
+    _page++;
+    await _loadBookings(loadMore: true);
   }
 
   /// Dismiss the newly-confirmed banner (user has seen it)
@@ -192,13 +238,13 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         '${_pendingBookings.length} booking${_pendingBookings.length == 1 ? '' : 's'} awaiting salon acceptance.',
                   ),
 
-                // ── Rejected booking banner ─────────────────────────────
-                if (_recentlyRejected.isNotEmpty)
+                // ── Rejected booking banner (shown once, 3-second auto-dismiss) ──
+                if (_pendingRejectionBanner.isNotEmpty)
                   _StatusBanner(
                     icon: Icons.cancel_outlined,
                     color: Colors.red.shade500,
                     message:
-                        '${_recentlyRejected.length == 1 ? 'A booking was' : '${_recentlyRejected.length} bookings were'} rejected. Tap to re-book.',
+                        '${_pendingRejectionBanner.length == 1 ? 'A booking was' : '${_pendingRejectionBanner.length} bookings were'} rejected. Tap to re-book.',
                     onTap: () => _tabController.animateTo(1),
                   ),
 
@@ -227,8 +273,10 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
                         isTablet: isTablet,
                         onRefresh: _loadBookings,
                         statusOptions: const [
-                          null, 'completed', 'rejected', 'cancelled'
+                          null, 'completed', 'rejected', 'cancelled', 'expired'
                         ],
+                        onLoadMore: _loadMore,
+                        hasMore: _hasMore,
                       ),
                     ],
                   ),
@@ -386,6 +434,9 @@ class _BookingList extends StatefulWidget {
   final Future<void> Function() onRefresh;
   // Status chips available for this tab (null entry = "All")
   final List<String?> statusOptions;
+  // Pagination (optional — only the past tab uses load-more)
+  final Future<void> Function()? onLoadMore;
+  final bool hasMore;
 
   const _BookingList({
     required this.bookings,
@@ -395,6 +446,8 @@ class _BookingList extends StatefulWidget {
     required this.isTablet,
     required this.onRefresh,
     required this.statusOptions,
+    this.onLoadMore,
+    this.hasMore = false,
   });
 
   @override
@@ -535,16 +588,45 @@ class _BookingListState extends State<_BookingList> {
               ? _buildEmpty(context, hasFilter: hasFilter)
               : RefreshIndicator(
                   onRefresh: widget.onRefresh,
-                  child: ListView.separated(
+                  child: ListView.builder(
                     padding: EdgeInsets.symmetric(
                       horizontal: widget.isTablet ? 32 : 16,
                       vertical: 14,
                     ),
-                    itemCount: filtered.length,
-                    separatorBuilder: (_, _) =>
-                        const SizedBox(height: 12),
-                    itemBuilder: (_, i) =>
-                        _BookingCard(booking: filtered[i]),
+                    // +1 for the load-more row when hasMore is true
+                    itemCount: filtered.length + (widget.hasMore ? 1 : 0),
+                    itemBuilder: (ctx, i) {
+                      if (i == filtered.length) {
+                        // Load-more footer
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          child: Center(
+                            child: OutlinedButton.icon(
+                              icon: const Icon(Icons.expand_more, size: 18),
+                              label: const Text('Load more'),
+                              onPressed: widget.onLoadMore,
+                              style: OutlinedButton.styleFrom(
+                                foregroundColor:
+                                    Theme.of(ctx).colorScheme.primary,
+                                side: BorderSide(
+                                    color: Theme.of(ctx)
+                                        .colorScheme
+                                        .primary
+                                        .withValues(alpha: 0.4)),
+                                shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(20)),
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 20, vertical: 10),
+                              ),
+                            ),
+                          ),
+                        );
+                      }
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 12),
+                        child: _BookingCard(booking: filtered[i]),
+                      );
+                    },
                   ),
                 ),
         ),
@@ -631,6 +713,7 @@ class _BookingCard extends StatelessWidget {
       case 'completed':   return Colors.blueGrey.shade500;
       case 'rejected':    return Colors.red.shade400;
       case 'cancelled':   return Colors.red.shade400;
+      case 'expired':     return Colors.brown.shade400;
       default: return Colors.grey;
     }
   }
@@ -643,6 +726,7 @@ class _BookingCard extends StatelessWidget {
       case 'completed':   return 'Completed';
       case 'rejected':    return 'Rejected';
       case 'cancelled':   return 'Cancelled';
+      case 'expired':     return 'Expired';
       default: return 'Unknown';
     }
   }
@@ -778,7 +862,8 @@ class _BookingCard extends StatelessWidget {
             // ── Book Again (past bookings only) ──────────────────────
             if (status == 'completed' ||
                 status == 'rejected' ||
-                status == 'cancelled')
+                status == 'cancelled' ||
+                status == 'expired')
               GestureDetector(
                 onTap: () => Navigator.push(
                   context,
