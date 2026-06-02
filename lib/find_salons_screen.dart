@@ -7,8 +7,8 @@ import 'widgets/app_snackbar.dart';
 import 'widgets/error_retry.dart';
 import 'widgets/loading_widget.dart';
 import 'widgets/star_rating.dart';
-import 'widgets/salon_thumb.dart';
 import 'salon_detail_screen.dart';
+import 'subscriptions_screen.dart';
 
 // ─── Sort options ─────────────────────────────────────────────────────────────
 
@@ -49,6 +49,7 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
   List<String>               _allAmenities = [];
   List<String>               _allServices  = [];
   Set<String>                _wishlistIds  = {};
+  String                     _customerPlan = 'free';
 
   // Active filters
   Set<String> _selAmenities = {};
@@ -95,10 +96,12 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
         ),
         ApiService.getAmenities(),
         ApiService.getServices(),
-        ApiService.getWishlistIds(),   // load heart states in parallel
+        ApiService.getWishlistIds(),
+        ApiService.getSubscription().catchError((_) => <String, dynamic>{}),
       ]);
 
       if (!mounted) return;
+      final subData = results[4] as Map<String, dynamic>;
       setState(() {
         _salons       = List<Map<String, dynamic>>.from(results[0] as List);
         _allAmenities = (results[1] as List)
@@ -110,6 +113,7 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
             .where((e) => e.isNotEmpty)
             .toList();
         _wishlistIds  = results[3] as Set<String>;
+        _customerPlan = (subData['plan'] as String?) ?? 'free';
         _loading = false;
       });
     } catch (e) {
@@ -125,8 +129,19 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
 
   Future<void> _refresh() => _loadAll();
 
+  static const _kWishlistFreeLimit = 10;
+
   Future<void> _toggleWishlist(String salonId) async {
     final isWishlisted = _wishlistIds.contains(salonId);
+
+    // Enforce wishlist limit for free plan before making any network call
+    if (!isWishlisted &&
+        _customerPlan == 'free' &&
+        _wishlistIds.length >= _kWishlistFreeLimit) {
+      _showWishlistUpgradeDialog();
+      return;
+    }
+
     // Optimistic update
     setState(() {
       if (isWishlisted) {
@@ -175,6 +190,54 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
       });
       AppSnackbar.error(context, 'Could not update wishlist. Try again.');
     }
+  }
+
+  void _showWishlistUpgradeDialog() {
+    final primary = Theme.of(context).colorScheme.primary;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: Row(children: [
+          Container(
+            padding: const EdgeInsets.all(8),
+            decoration: BoxDecoration(
+              color: Colors.amber.withValues(alpha: 0.15),
+              shape: BoxShape.circle,
+            ),
+            child: const Icon(Icons.favorite, color: Colors.amber, size: 22),
+          ),
+          const SizedBox(width: 12),
+          const Text('Wishlist Full',
+              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+        ]),
+        content: const Text(
+          'Free plan allows up to 10 saved salons.\n\nUpgrade to Basic or Pro for an unlimited wishlist.',
+          style: TextStyle(color: Colors.black54, fontSize: 14, height: 1.5),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Not Now', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              Navigator.push(context,
+                  MaterialPageRoute(builder: (_) => const SubscriptionsScreen()));
+            },
+            child: const Text('Upgrade'),
+          ),
+          const SizedBox(width: 4),
+        ],
+      ),
+    );
   }
 
   // ── Filter sheet helpers ───────────────────────────────────────────────────
@@ -459,23 +522,23 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
   // ── Salon card ─────────────────────────────────────────────────────────────
 
   Widget _buildSalonCard(Map<String, dynamic> salon, Color primary) {
-    final salonId    = salon['id']             as String;
-    final name       = salon['name']           as String? ?? 'Salon';
-    final city       = salon['city']           as String? ?? '';
-    final address    = salon['address']        as String? ?? '';
-    final open       = salon['openingTime']    as String?;
-    final close      = salon['closingTime']    as String?;
-    final dist       = salon['distance']       as num?;
-    final rating     = (salon['rating']        as num?)?.toDouble() ?? 0.0;
-    final reviews    = (salon['reviewCount']   as num?)?.toInt()   ?? 0;
-    final services   = (salon['services']      as List?)?.cast<String>() ?? [];
-    final amenities  = (salon['amenities']     as List?)?.cast<String>() ?? [];
-    final featured   = salon['featured']       as bool? ?? false;
-    final isWishlisted = _wishlistIds.contains(salonId);
+    final salonId         = salon['id']             as String;
+    final name            = salon['name']           as String? ?? 'Salon';
+    final city            = salon['city']           as String? ?? '';
+    final address         = salon['address']        as String? ?? '';
+    final open            = salon['openingTime']    as String?;
+    final close           = salon['closingTime']    as String?;
+    final dist            = salon['distance']       as num?;
+    final rating          = (salon['rating']        as num?)?.toDouble() ?? 0.0;
+    final reviews         = (salon['reviewCount']   as num?)?.toInt()   ?? 0;
+    final services        = (salon['services']      as List?)?.cast<String>() ?? [];
+    final amenities       = (salon['amenities']     as List?)?.cast<String>() ?? [];
+    final featured        = salon['featured']        as bool? ?? false;
+    final priorityListing = salon['priorityListing'] as bool? ?? false;
+    final imageUrl        = salon['image']           as String?;
+    final isWishlisted    = _wishlistIds.contains(salonId);
 
-    final locationStr = [address, city]
-        .where((e) => e.isNotEmpty)
-        .join(', ');
+    final locationStr = [address, city].where((e) => e.isNotEmpty).join(', ');
 
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -493,130 +556,168 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
         ),
       ),
       child: Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        color: Colors.white,
-        borderRadius: BorderRadius.circular(18),
-        boxShadow: [
-          BoxShadow(color: Colors.black.withValues(alpha: 0.06),
-              blurRadius: 12, offset: const Offset(0, 4)),
-        ],
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Name row
-          Row(children: [
-            SalonThumb(imageUrl: salon['image'] as String?, size: 44, primary: primary),
-            const SizedBox(width: 12),
-            Expanded(
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(16),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.07),
+                blurRadius: 10, offset: const Offset(0, 3)),
+          ],
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // ── Top image ──────────────────────────────────────────────
+            Stack(
+              children: [
+                ClipRRect(
+                  borderRadius: const BorderRadius.vertical(top: Radius.circular(16)),
+                  child: SizedBox(
+                    height: 130,
+                    width: double.infinity,
+                    child: imageUrl != null && imageUrl.isNotEmpty
+                        ? Image.network(
+                            '${ApiService.baseUrl}$imageUrl',
+                            fit: BoxFit.cover,
+                            errorBuilder: (_, _, _) => _imagePlaceholder(),
+                          )
+                        : _imagePlaceholder(),
+                  ),
+                ),
+                // Wishlist button overlay (top-right)
+                Positioned(
+                  top: 8, right: 8,
+                  child: GestureDetector(
+                    onTap: () => _toggleWishlist(salonId),
+                    child: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        color: Colors.white.withValues(alpha: 0.9),
+                        shape: BoxShape.circle,
+                        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.1),
+                            blurRadius: 4)],
+                      ),
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 200),
+                        child: Icon(
+                          isWishlisted ? Icons.favorite_rounded : Icons.favorite_border_rounded,
+                          key: ValueKey(isWishlisted),
+                          size: 18,
+                          color: isWishlisted ? Colors.red.shade400 : Colors.grey.shade500,
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                // Distance badge overlay (top-left)
+                if (dist != null)
+                  Positioned(
+                    top: 8, left: 8,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.55),
+                        borderRadius: BorderRadius.circular(20),
+                      ),
+                      child: Text('${dist.toStringAsFixed(1)} km',
+                          style: const TextStyle(fontSize: 11,
+                              fontWeight: FontWeight.w600, color: Colors.white)),
+                    ),
+                  ),
+              ],
+            ),
+
+            // ── Info section ───────────────────────────────────────────
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text(name,
-                      style: const TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.bold),
-                      maxLines: 1, overflow: TextOverflow.ellipsis),
-                  if (featured) ...[
-                    const SizedBox(height: 3),
-                    Row(children: [
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 6, vertical: 2),
-                        decoration: BoxDecoration(
-                          color: Colors.amber.shade50,
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.amber.shade300),
-                        ),
-                        child: Row(mainAxisSize: MainAxisSize.min, children: [
-                          Icon(Icons.verified_outlined,
-                              size: 11, color: Colors.amber.shade700),
-                          const SizedBox(width: 3),
-                          Text('Featured',
-                              style: TextStyle(
-                                  fontSize: 10,
-                                  color: Colors.amber.shade800,
-                                  fontWeight: FontWeight.w600)),
-                        ]),
+                  // Name + badges row
+                  Row(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(name,
+                              style: const TextStyle(
+                                  fontSize: 15, fontWeight: FontWeight.bold),
+                              maxLines: 1, overflow: TextOverflow.ellipsis),
+                          if (featured || priorityListing) ...[
+                            const SizedBox(height: 3),
+                            Wrap(spacing: 4, children: [
+                              if (featured)
+                                _badge('Featured', Colors.amber.shade700),
+                              if (priorityListing)
+                                _badge('Priority', Colors.purple.shade600),
+                            ]),
+                          ],
+                        ],
                       ),
-                    ]),
+                    ),
+                    const SizedBox(width: 8),
+                    StarRating(rating: rating, reviewCount: reviews,
+                        compact: true, starSize: 13),
+                  ]),
+
+                  const SizedBox(height: 8),
+
+                  // Location & hours
+                  if (locationStr.isNotEmpty)
+                    _infoRow(Icons.location_on_outlined, locationStr),
+                  if (open != null && close != null)
+                    _infoRow(Icons.access_time, '$open – $close'),
+
+                  // Services chips
+                  if (services.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 6, runSpacing: 5,
+                      children: [
+                        ...services.take(4).map((s) => _chip(s, primary)),
+                        if (services.length > 4)
+                          _chip('+${services.length - 4} more',
+                              Colors.grey.shade500, bg: Colors.grey.shade100),
+                      ],
+                    ),
                   ],
-                  const SizedBox(height: 2),
-                  StarRating(rating: rating, reviewCount: reviews,
-                      compact: true, starSize: 13),
+
+                  // Amenities chips
+                  if (amenities.isNotEmpty) ...[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6, runSpacing: 5,
+                      children: amenities.take(5).map((a) => _amenityChip(a)).toList(),
+                    ),
+                  ],
                 ],
               ),
             ),
-            if (dist != null) ...[
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                decoration: BoxDecoration(
-                  color: primary.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                ),
-                child: Text('${dist.toStringAsFixed(2)} km',
-                    style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600,
-                        color: primary)),
-              ),
-              const SizedBox(width: 4),
-            ],
-            // Wishlist heart button
-            GestureDetector(
-              onTap: () => _toggleWishlist(salonId),
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 200),
-                child: Icon(
-                  isWishlisted
-                      ? Icons.favorite_rounded
-                      : Icons.favorite_border_rounded,
-                  key: ValueKey(isWishlisted),
-                  size: 22,
-                  color: isWishlisted ? Colors.red.shade400 : Colors.grey.shade400,
-                ),
-              ),
-            ),
-          ]),
-
-          const SizedBox(height: 10),
-          Divider(height: 1, color: Colors.grey.shade100),
-          const SizedBox(height: 10),
-
-          // Location & hours
-          if (locationStr.isNotEmpty)
-            _infoRow(Icons.location_on_outlined, locationStr),
-          if (open != null && close != null)
-            _infoRow(Icons.access_time, '$open – $close'),
-
-          // Services chips
-          if (services.isNotEmpty) ...[
-            const SizedBox(height: 10),
-            Wrap(
-              spacing: 6, runSpacing: 6,
-              children: [
-                ...services.take(4).map((s) => _chip(s, primary)),
-                if (services.length > 4)
-                  _chip('+${services.length - 4} more', Colors.grey.shade500,
-                      bg: Colors.grey.shade100),
-              ],
-            ),
           ],
-
-          // Amenities chips
-          if (amenities.isNotEmpty) ...[
-            const SizedBox(height: 6),
-            Wrap(
-              spacing: 6, runSpacing: 6,
-              children: amenities
-                  .take(4)
-                  .map((a) => _chip(a, Colors.teal.shade700,
-                      bg: Colors.teal.shade50))
-                  .toList(),
-            ),
-          ],
-        ],
+        ),
       ),
-    ),  // Container
-    );  // GestureDetector
+    );
+  }
+
+  Widget _imagePlaceholder() {
+    return Container(
+      color: Colors.grey.shade100,
+      child: Center(
+        child: Icon(Icons.storefront_rounded, size: 40, color: Colors.grey.shade300),
+      ),
+    );
+  }
+
+  Widget _badge(String label, Color color) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(4),
+      ),
+      child: Text(label,
+          style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+    );
   }
 
   Widget _infoRow(IconData icon, String text) {
@@ -631,6 +732,50 @@ class _FindSalonsScreenState extends State<FindSalonsScreen> {
               maxLines: 1, overflow: TextOverflow.ellipsis),
         ),
       ]),
+    );
+  }
+
+  static IconData _amenityIcon(String name) {
+    final key = name.toLowerCase();
+    if (key.contains('ac') || key.contains('air')) return Icons.ac_unit;
+    if (key.contains('wifi') || key.contains('wi-fi')) return Icons.wifi;
+    if (key.contains('park')) return Icons.local_parking;
+    if (key.contains('sanitiz') || key.contains('hygiene') || key.contains('clean')) {
+      return Icons.clean_hands_outlined;
+    }
+    if (key.contains('family') || key.contains('kid')) return Icons.family_restroom;
+    if (key.contains('card') || key.contains('payment') || key.contains('upi')) {
+      return Icons.credit_card_outlined;
+    }
+    if (key.contains('premium') || key.contains('interior') || key.contains('luxury')) {
+      return Icons.auto_awesome_outlined;
+    }
+    if (key.contains('tv') || key.contains('entertainment')) return Icons.tv;
+    if (key.contains('wheelchair') || key.contains('accessible')) return Icons.accessible_outlined;
+    if (key.contains('water') || key.contains('drink')) return Icons.local_drink_outlined;
+    return Icons.check_circle_outline;
+  }
+
+  Widget _amenityChip(String label) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      decoration: BoxDecoration(
+        color: Colors.teal.shade50,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: Colors.teal.shade100),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(_amenityIcon(label), size: 11, color: Colors.teal.shade700),
+          const SizedBox(width: 4),
+          Text(label,
+              style: TextStyle(
+                  fontSize: 11,
+                  color: Colors.teal.shade700,
+                  fontWeight: FontWeight.w500)),
+        ],
+      ),
     );
   }
 
@@ -671,54 +816,56 @@ class _SortSheet extends StatelessWidget {
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
     return SafeArea(
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Center(
-              child: Container(
-                width: 40, height: 4,
-                decoration: BoxDecoration(
-                    color: Colors.grey.shade300,
-                    borderRadius: BorderRadius.circular(2)),
-              ),
-            ),
-            const SizedBox(height: 16),
-            const Text('Sort By',
-                style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            ..._sortOptions.map((opt) {
-              final selected = opt.value == current;
-              return ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: Container(
-                  width: 36, height: 36,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 16, 20, 8),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Center(
+                child: Container(
+                  width: 40, height: 4,
                   decoration: BoxDecoration(
-                    color: selected
-                        ? primary.withValues(alpha: 0.12)
-                        : Colors.grey.shade100,
-                    shape: BoxShape.circle,
-                  ),
-                  child: Icon(opt.icon,
-                      size: 18, color: selected ? primary : Colors.grey),
+                      color: Colors.grey.shade300,
+                      borderRadius: BorderRadius.circular(2)),
                 ),
-                title: Text(opt.label,
-                    style: TextStyle(
-                      fontSize: 14,
-                      fontWeight:
-                          selected ? FontWeight.w700 : FontWeight.normal,
-                      color: selected ? primary : Colors.black87,
-                    )),
-                trailing: selected
-                    ? Icon(Icons.check_circle_rounded, color: primary, size: 20)
-                    : null,
-                onTap: () => Navigator.pop(context, opt.value),
-              );
-            }),
-            const SizedBox(height: 8),
-          ],
+              ),
+              const SizedBox(height: 16),
+              const Text('Sort By',
+                  style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              const SizedBox(height: 12),
+              ..._sortOptions.map((opt) {
+                final selected = opt.value == current;
+                return ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: Container(
+                    width: 36, height: 36,
+                    decoration: BoxDecoration(
+                      color: selected
+                          ? primary.withValues(alpha: 0.12)
+                          : Colors.grey.shade100,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(opt.icon,
+                        size: 18, color: selected ? primary : Colors.grey),
+                  ),
+                  title: Text(opt.label,
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight:
+                            selected ? FontWeight.w700 : FontWeight.normal,
+                        color: selected ? primary : Colors.black87,
+                      )),
+                  trailing: selected
+                      ? Icon(Icons.check_circle_rounded, color: primary, size: 20)
+                      : null,
+                  onTap: () => Navigator.pop(context, opt.value),
+                );
+              }),
+              const SizedBox(height: 8),
+            ],
+          ),
         ),
       ),
     );

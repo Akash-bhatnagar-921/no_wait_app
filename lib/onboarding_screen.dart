@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'main.dart';
+import 'role_selection_screen.dart';
 
 // Key stored in SharedPreferences once onboarding is done
 const _kOnboardingDone = 'onboarding_done';

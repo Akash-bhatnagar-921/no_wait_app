@@ -13,11 +13,14 @@ class AdminBookingsTab extends StatefulWidget {
 
 class _AdminBookingsTabState extends State<AdminBookingsTab> {
   final _searchCtrl = TextEditingController();
-  String _status = '';
+  String _status     = '';
+  String _dateFilter = '';
+  DateTime? _customFrom;
+  DateTime? _customTo;
   List<dynamic> _bookings = [];
   int _total = 0;
-  int _page = 1;
-  bool _loading = true;
+  int _page  = 1;
+  bool _loading     = true;
   bool _loadingMore = false;
 
   @override
@@ -32,6 +35,39 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     super.dispose();
   }
 
+  String? get _dateFrom {
+    final now = DateTime.now();
+    switch (_dateFilter) {
+      case 'today':
+        return DateFormat('yyyy-MM-dd').format(now);
+      case 'week':
+        return DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 6)));
+      case 'month':
+        return DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+      case 'year':
+        return DateFormat('yyyy-MM-dd').format(DateTime(now.year, 1, 1));
+      case 'custom':
+        return _customFrom != null ? DateFormat('yyyy-MM-dd').format(_customFrom!) : null;
+      default:
+        return null;
+    }
+  }
+
+  String? get _dateTo {
+    final now = DateTime.now();
+    switch (_dateFilter) {
+      case 'today':
+      case 'week':
+      case 'month':
+      case 'year':
+        return DateFormat('yyyy-MM-dd').format(now);
+      case 'custom':
+        return _customTo != null ? DateFormat('yyyy-MM-dd').format(_customTo!) : null;
+      default:
+        return null;
+    }
+  }
+
   Future<void> _load({bool reset = false}) async {
     if (reset) {
       setState(() { _loading = true; _page = 1; _bookings = []; });
@@ -39,13 +75,14 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     try {
       final res = await ApiService.adminGetBookings(
         page: _page, search: _searchCtrl.text.trim(), status: _status,
+        dateFrom: _dateFrom, dateTo: _dateTo,
       );
       if (mounted) {
         setState(() {
           final fetched = res['bookings'] as List<dynamic>? ?? [];
           _bookings = reset ? fetched : [..._bookings, ...fetched];
-          _total = (res['total'] as num?)?.toInt() ?? 0;
-          _loading = false;
+          _total    = (res['total'] as num?)?.toInt() ?? 0;
+          _loading     = false;
           _loadingMore = false;
         });
       }
@@ -60,6 +97,31 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     if (_loadingMore || _bookings.length >= _total) { return; }
     setState(() { _page++; _loadingMore = true; });
     _load();
+  }
+
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(2024),
+      lastDate: now,
+      initialDateRange: _customFrom != null && _customTo != null
+          ? DateTimeRange(start: _customFrom!, end: _customTo!)
+          : null,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+            colorScheme: const ColorScheme.light(primary: _p)),
+        child: child!,
+      ),
+    );
+    if (picked != null) {
+      setState(() {
+        _dateFilter  = 'custom';
+        _customFrom  = picked.start;
+        _customTo    = picked.end;
+      });
+      _load(reset: true);
+    }
   }
 
   void _showDetail(Map<String, dynamic> b) {
@@ -78,6 +140,10 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
       '': 'All', 'pending': 'Pending', 'confirmed': 'Confirmed',
       'completed': 'Completed', 'cancelled': 'Cancelled',
     };
+    const dateOptions = {
+      '': 'All Dates', 'today': 'Today', 'week': 'This Week',
+      'month': 'This Month', 'year': 'This Year',
+    };
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
@@ -88,7 +154,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(110),
+          preferredSize: const Size.fromHeight(148),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             child: Column(children: [
@@ -120,6 +186,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                 ),
               ),
               const SizedBox(height: 8),
+              // Status filter
               SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
                 child: Row(children: [
@@ -137,12 +204,72 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
                       },
                       selectedColor: _p,
                       backgroundColor: Colors.white,
-                      side: BorderSide(color: _status == e.key ? _p : Colors.grey.shade300),
+                      side: BorderSide(
+                          color: _status == e.key ? _p : Colors.grey.shade300),
                       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                     ),
                   )),
                   Text('$_total total',
                       style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+              ),
+              const SizedBox(height: 8),
+              // Date filter
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  ...dateOptions.entries.map((e) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(e.value,
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w600,
+                              color: _dateFilter == e.key ? Colors.white : Colors.black87)),
+                      selected: _dateFilter == e.key,
+                      onSelected: (_) {
+                        setState(() => _dateFilter = e.key);
+                        _load(reset: true);
+                      },
+                      selectedColor: _p,
+                      backgroundColor: Colors.white,
+                      side: BorderSide(
+                          color: _dateFilter == e.key ? _p : Colors.grey.shade300),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    ),
+                  )),
+                  GestureDetector(
+                    onTap: _pickCustomRange,
+                    child: Container(
+                      padding:
+                          const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _dateFilter == 'custom' ? _p : Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: _dateFilter == 'custom'
+                                ? _p
+                                : Colors.grey.shade300),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.date_range,
+                            size: 11,
+                            color: _dateFilter == 'custom'
+                                ? Colors.white
+                                : Colors.black87),
+                        const SizedBox(width: 4),
+                        Text(
+                          _dateFilter == 'custom' && _customFrom != null
+                              ? '${DateFormat('d MMM').format(_customFrom!)} – ${DateFormat('d MMM').format(_customTo ?? _customFrom!)}'
+                              : 'Custom',
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w600,
+                              color: _dateFilter == 'custom'
+                                  ? Colors.white
+                                  : Colors.black87),
+                        ),
+                      ]),
+                    ),
+                  ),
                 ]),
               ),
             ]),
@@ -195,7 +322,8 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
     final status = b['status'] as String? ?? '';
     final color  = _statusColor(status);
     final dt     = _fmtDt(b['scheduledAt']);
-    final amount = double.tryParse(b['totalAmount']?.toString() ?? '0') ?? 0.0;
+    final amount =
+        double.tryParse(b['totalAmount']?.toString() ?? '0') ?? 0.0;
 
     return GestureDetector(
       onTap: () => _showDetail(b),
@@ -215,13 +343,17 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
             decoration: BoxDecoration(
                 color: color.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(12)),
-            child: Icon(Icons.calendar_month_outlined, color: color, size: 20),
+            child:
+                Icon(Icons.calendar_month_outlined, color: color, size: 20),
           ),
           const SizedBox(width: 12),
-          Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+          Expanded(
+              child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
             Text(b['salonName'] as String? ?? '',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 14),
                 overflow: TextOverflow.ellipsis),
             Text(
               '${b['customerName'] ?? b['customerPhone'] ?? ''}  ·  $dt',
@@ -231,7 +363,8 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
           const SizedBox(width: 8),
           Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
             Text('₹${amount.toStringAsFixed(0)}',
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                style: const TextStyle(
+                    fontWeight: FontWeight.bold, fontSize: 14)),
             _statusChip(status, color),
           ]),
         ]),
@@ -265,7 +398,7 @@ class _AdminBookingsTabState extends State<AdminBookingsTab> {
   }
 }
 
-// ── Booking detail sheet ──────────────────────────────────────────────────────
+// ── Booking detail sheet ───────────────────────────────────────────────────────
 
 class _BookingDetailSheet extends StatelessWidget {
   final Map<String, dynamic> booking;
@@ -273,11 +406,13 @@ class _BookingDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final status  = booking['status'] as String? ?? '';
-    final color   = _statusColor(status);
-    final amount  = double.tryParse(booking['totalAmount']?.toString() ?? '0') ?? 0.0;
-    final fee     = double.tryParse(booking['convenienceFee']?.toString() ?? '0') ?? 0.0;
-    final dur     = (booking['totalDuration'] as num?)?.toInt() ?? 0;
+    final status   = booking['status'] as String? ?? '';
+    final color    = _statusColor(status);
+    final amount   =
+        double.tryParse(booking['totalAmount']?.toString() ?? '0') ?? 0.0;
+    final fee      =
+        double.tryParse(booking['convenienceFee']?.toString() ?? '0') ?? 0.0;
+    final dur      = (booking['totalDuration'] as num?)?.toInt() ?? 0;
     final services = booking['services'] as List<dynamic>? ?? [];
 
     return DraggableScrollableSheet(
@@ -323,16 +458,19 @@ class _BookingDetailSheet extends StatelessWidget {
               _row(Icons.calendar_today_outlined, 'Scheduled',
                   _fmtDt(booking['scheduledAt'])),
               _row(Icons.timer_outlined, 'Duration', '$dur min'),
-              _row(Icons.currency_rupee, 'Amount', '₹${amount.toStringAsFixed(2)}'),
+              _row(Icons.currency_rupee, 'Amount',
+                  '₹${amount.toStringAsFixed(2)}'),
               if (fee > 0)
-                _row(Icons.percent, 'Convenience Fee (3%)', '₹${fee.toStringAsFixed(2)}'),
+                _row(Icons.percent, 'Convenience Fee (3%)',
+                    '₹${fee.toStringAsFixed(2)}'),
               if ((booking['bookingOtp'] as String?) != null)
                 _row(Icons.password_outlined, 'OTP',
                     booking['bookingOtp'] as String),
               if (services.isNotEmpty) ...[
                 const SizedBox(height: 12),
                 const Text('Services',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                    style: TextStyle(
+                        fontWeight: FontWeight.bold, fontSize: 14)),
                 const SizedBox(height: 8),
                 ...services.map((s) {
                   final sm = s as Map<String, dynamic>;
@@ -342,7 +480,8 @@ class _BookingDetailSheet extends StatelessWidget {
                       const Icon(Icons.check_circle_outline,
                           size: 14, color: Colors.green),
                       const SizedBox(width: 8),
-                      Expanded(child: Text(sm['serviceName'] as String? ?? '',
+                      Expanded(child: Text(
+                          sm['serviceName'] as String? ?? '',
                           style: const TextStyle(fontSize: 13))),
                       Text('₹${sm['price'] ?? 0}',
                           style: const TextStyle(
@@ -364,7 +503,8 @@ class _BookingDetailSheet extends StatelessWidget {
     child: Row(children: [
       Icon(icon, size: 16, color: Colors.grey.shade400),
       const SizedBox(width: 10),
-      Text('$label: ', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
+      Text('$label: ',
+          style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
       Expanded(child: Text(value,
           style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
     ]),
@@ -382,6 +522,8 @@ class _BookingDetailSheet extends StatelessWidget {
   String _fmtDt(dynamic v) {
     if (v == null) { return '—'; }
     final dt = DateTime.tryParse(v.toString());
-    return dt != null ? DateFormat('d MMM yyyy, h:mm a').format(dt.toLocal()) : '—';
+    return dt != null
+        ? DateFormat('d MMM yyyy, h:mm a').format(dt.toLocal())
+        : '—';
   }
 }

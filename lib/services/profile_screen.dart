@@ -6,7 +6,7 @@ import 'package:no_wait_app/widgets/app_snackbar.dart';
 import 'package:no_wait_app/widgets/loading_widget.dart';
 import 'package:no_wait_app/widgets/profile_completion_widget.dart';
 import 'package:intl/intl.dart';
-import 'package:no_wait_app/main.dart';
+import 'package:no_wait_app/role_selection_screen.dart';
 
 class ProfileScreen extends StatefulWidget {
   const ProfileScreen({super.key});

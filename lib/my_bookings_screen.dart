@@ -98,9 +98,14 @@ class _MyBookingsScreenState extends State<MyBookingsScreen>
 
       final newBookings = (result['bookings'] as List? ?? [])
           .cast<Map<String, dynamic>>();
+      final walkIns = loadMore
+          ? <Map<String, dynamic>>[]
+          : (result['walkIns'] as List? ?? []).cast<Map<String, dynamic>>();
       final pagination = result['pagination'] as Map<String, dynamic>? ?? {};
 
-      final combined = loadMore ? [..._bookings, ...newBookings] : newBookings;
+      final combined = loadMore
+          ? [..._bookings, ...newBookings]
+          : [...newBookings, ...walkIns];
 
       // Detect pending→confirmed transitions
       final confirmed = newBookings.where((b) {
@@ -746,6 +751,7 @@ class _BookingCard extends StatelessWidget {
     final duration = (booking['totalDuration'] as num?)?.toInt() ?? 0;
     final services = (booking['services'] as List?) ?? [];
     final canModify = booking['canModify'] == true;
+    final isWalkIn = booking['type'] == 'walk_in';
 
     return GestureDetector(
       onTap: () => Navigator.push(
@@ -805,6 +811,28 @@ class _BookingCard extends StatelessWidget {
             ),
           ]),
 
+          if (isWalkIn) ...[
+            const SizedBox(height: 8),
+            Row(children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade50,
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.purple.shade200),
+                ),
+                child: Row(mainAxisSize: MainAxisSize.min, children: [
+                  Icon(Icons.store_outlined, size: 11, color: Colors.purple.shade700),
+                  const SizedBox(width: 4),
+                  Text('Offline booking',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.purple.shade700,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ]),
+          ],
           const SizedBox(height: 10),
           Divider(height: 1, color: Colors.grey.shade100),
           const SizedBox(height: 10),

@@ -10,6 +10,7 @@ import 'widgets/loading_widget.dart';
 import 'widgets/star_rating.dart';
 import 'widgets/salon_thumb.dart';
 import 'booking_summary_screen.dart';
+import 'barber_profile_screen.dart';
 
 class SalonDetailScreen extends StatefulWidget {
   final String salonId;
@@ -37,9 +38,11 @@ class SalonDetailScreen extends StatefulWidget {
 
 class _SalonDetailScreenState extends State<SalonDetailScreen> {
   Map<String, dynamic>? _detail;
+  Map<String, dynamic>? _queueInfo;
   bool _loading = true;
   bool _hasError = false;
-  bool _planLimitReached = false;
+  bool   _planLimitReached = false;
+  String _customerPlan     = '';
 
   // Selected service ids + their data
   final Map<String, Map<String, dynamic>> _selectedServices = {};
@@ -52,8 +55,9 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
 
   List<dynamic> get _services => (_detail?['services'] as List?) ?? [];
   List<dynamic> get _amenities => (_detail?['amenities'] as List?) ?? [];
-  List<dynamic> _reviews = [];
-  List<dynamic> _offers  = [];
+  List<dynamic> _reviews   = [];
+  List<dynamic> _offers    = [];
+  List<dynamic> _portfolio = [];
 
   @override
   void initState() {
@@ -70,17 +74,21 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
         ApiService.getMonthlyBookingCount(),
         ApiService.getSubscription(),
         ApiService.getSalonOffers(widget.salonId),
+        ApiService.getSalonQueue(widget.salonId),
+        ApiService.getSalonPortfolio(widget.salonId),
       ]);
       if (mounted) {
         final monthlyCount = results[2] as int;
         final sub          = results[3] as Map<String, dynamic>;
-        // '' as the unknown sentinel — API errors must not block paid users.
         final plan         = sub['plan']?.toString() ?? '';
         setState(() {
           _detail           = results[0] as Map<String, dynamic>?;
           _reviews          = results[1] as List<dynamic>;
           _planLimitReached = plan == 'free' && monthlyCount >= 2;
+          _customerPlan     = plan;
           _offers           = results[4] as List<dynamic>;
+          _queueInfo        = results[5] as Map<String, dynamic>;
+          _portfolio        = results[6] as List<dynamic>;
           _loading          = false;
         });
       }
@@ -113,11 +121,214 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
     });
   }
 
+  bool _isTodayBookingWindowClosed() {
+    final now = DateTime.now();
+    final isToday = widget.initialDate.year == now.year &&
+        widget.initialDate.month == now.month &&
+        widget.initialDate.day == now.day;
+    if (!isToday) return false;
+    final closingStr = _detail?['closingTime'] as String?;
+    if (closingStr == null || !closingStr.contains(':')) return false;
+    final parts = closingStr.split(':');
+    final cH = int.tryParse(parts[0]) ?? 23;
+    final cM = int.tryParse(parts[1]) ?? 59;
+    return now.isAfter(DateTime(now.year, now.month, now.day, cH, cM));
+  }
+
+  void _showReportDialog(BuildContext ctx) {
+    const reasons = [
+      'Inappropriate behavior',
+      'Fraud or scam',
+      'Poor service quality',
+      'Health & safety concern',
+      'Fake reviews / misleading info',
+      'Other',
+    ];
+    String? selectedReason;
+    String selectedSeverity = 'minor';
+    final descCtrl = TextEditingController();
+
+    showDialog(
+      context: ctx,
+      builder: (dCtx) => StatefulBuilder(
+        builder: (dCtx, setS) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Text('Report Salon', style: TextStyle(fontWeight: FontWeight.bold)),
+          contentPadding: const EdgeInsets.fromLTRB(16, 16, 16, 0),
+          content: SingleChildScrollView(
+            child: Column(crossAxisAlignment: CrossAxisAlignment.start, mainAxisSize: MainAxisSize.min, children: [
+              const Text('Reason', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 8),
+              ...reasons.map((r) => RadioListTile<String>(
+                dense: true,
+                contentPadding: EdgeInsets.zero,
+                title: Text(r, style: const TextStyle(fontSize: 13)),
+                value: r,
+                groupValue: selectedReason,
+                activeColor: const Color(0xFF1565C0),
+                onChanged: (v) => setS(() => selectedReason = v),
+              )),
+              const SizedBox(height: 8),
+              const Text('Severity', style: TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 6),
+              Row(children: [
+                for (final s in ['minor', 'major'])
+                  Expanded(child: Padding(
+                    padding: EdgeInsets.only(right: s == 'minor' ? 6 : 0),
+                    child: ChoiceChip(
+                      label: Text(s == 'minor' ? 'Minor' : 'Major',
+                          style: TextStyle(fontSize: 12,
+                              color: selectedSeverity == s ? Colors.white : Colors.black87)),
+                      selected: selectedSeverity == s,
+                      selectedColor: s == 'major' ? Colors.red.shade600 : Colors.orange.shade600,
+                      backgroundColor: Colors.grey.shade100,
+                      onSelected: (_) => setS(() => selectedSeverity = s),
+                    ),
+                  )),
+              ]),
+              const SizedBox(height: 10),
+              TextField(
+                controller: descCtrl,
+                maxLines: 2,
+                decoration: InputDecoration(
+                  hintText: 'Additional details (optional)',
+                  isDense: true,
+                  contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+              const SizedBox(height: 8),
+            ]),
+          ),
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(dCtx),
+                child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: const Color(0xFF1565C0), foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+              onPressed: () async {
+                if (selectedReason == null) return;
+                Navigator.pop(dCtx);
+                try {
+                  await ApiService.submitComplaint(
+                    type: 'salon',
+                    targetId: widget.salonId,
+                    reason: selectedReason!,
+                    description: descCtrl.text.trim(),
+                    severity: selectedSeverity,
+                  );
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Report submitted. Thank you for your feedback.')),
+                    );
+                  }
+                } catch (_) {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Failed to submit report. Please try again.')),
+                    );
+                  }
+                }
+              },
+              child: const Text('Submit Report'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showTodayClosedDialog() {
+    final phone = (_detail?['contactNumber'] as String?) ?? '';
+    final primary = Theme.of(context).colorScheme.primary;
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+        title: const Text("Looks like today's fully booked online",
+            style: TextStyle(fontWeight: FontWeight.bold)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              "The online booking window for today has closed.\n\n"
+              "Give them a quick call — they might still squeeze you in.",
+              style: TextStyle(fontSize: 14, height: 1.4),
+            ),
+            if (phone.isNotEmpty) ...[
+              const SizedBox(height: 16),
+              GestureDetector(
+                onTap: () async {
+                  final uri = Uri.parse('tel:$phone');
+                  if (await canLaunchUrl(uri)) launchUrl(uri);
+                },
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 16, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.green.shade50,
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.green.shade200),
+                  ),
+                  child: Row(children: [
+                    Icon(Icons.phone_outlined,
+                        color: Colors.green.shade700, size: 18),
+                    const SizedBox(width: 8),
+                    Text(
+                      phone,
+                      style: TextStyle(
+                        color: Colors.green.shade700,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
+            ],
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child:
+                const Text('Maybe Later', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _openSlotPickerFromDate(
+                  DateTime.now().add(const Duration(days: 1)));
+            },
+            child: const Text('Book for Tomorrow Instead'),
+          ),
+        ],
+      ),
+    );
+  }
+
   void _openSlotPicker() async {
     if (_selectedServices.isEmpty) {
-      AppSnackbar.error(context, 'Please select at least one service.');
+      AppSnackbar.error(context, 'Ready to look fresh? Pick a service first.');
       return;
     }
+    if (_isTodayBookingWindowClosed()) {
+      _showTodayClosedDialog();
+      return;
+    }
+    _openSlotPickerFromDate(widget.initialDate);
+  }
+
+  void _openSlotPickerFromDate(DateTime from) async {
     // Parse workingDays from salon detail (e.g. "Mon,Tue,Wed,Thu,Fri,Sat")
     final rawDays   = _detail?['workingDays'] as String? ?? '';
     final workingDays = rawDays.isEmpty
@@ -129,9 +340,11 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       builder: (_) => _SlotPickerSheet(
-        salonId:     widget.salonId,
-        initialDate: widget.initialDate,
-        workingDays: workingDays,
+        salonId:       widget.salonId,
+        initialDate:   from,
+        workingDays:   workingDays,
+        closingTime:   _detail?['closingTime'] as String?,
+        contactNumber: (_detail?['contactNumber'] as String?) ?? '',
         onSlotSelected: (date, slot) {
           Navigator.pop(context);
           _goToSummary(date, slot);
@@ -175,6 +388,13 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
         backgroundColor: Colors.white,
         foregroundColor: Colors.black,
         elevation: 0,
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.flag_outlined),
+            tooltip: 'Report',
+            onPressed: () => _showReportDialog(context),
+          ),
+        ],
       ),
       body: _loading
           ? const AppLoadingIndicator(message: 'Loading salon…')
@@ -199,6 +419,14 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
                           if (_amenities.isNotEmpty) ...[
                             const SizedBox(height: 20),
                             _buildAmenitiesSection(),
+                          ],
+                          if ((_detail?['barbers'] as List?)?.isNotEmpty == true) ...[
+                            const SizedBox(height: 20),
+                            _buildBarbersSection(primary),
+                          ],
+                          if (_portfolio.isNotEmpty) ...[
+                            const SizedBox(height: 20),
+                            _buildPortfolioSection(),
                           ],
                           if (_offers.isNotEmpty) ...[
                             const SizedBox(height: 20),
@@ -316,7 +544,45 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
           ],
           if (barberCount > 0)
             _infoRow(Icons.person_outline, '$barberCount barber${barberCount == 1 ? '' : 's'} available'),
+          _buildQueueRow(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildQueueRow() {
+    if (_queueInfo == null) return const SizedBox.shrink();
+    final queueSize = (_queueInfo!['queueSize'] as num?)?.toInt() ?? 0;
+    final waitMins  = (_queueInfo!['estimatedWaitMins'] as num?)?.toInt() ?? 0;
+    final available = _queueInfo!['isAvailable'] as bool? ?? true;
+
+    final color = available ? Colors.green.shade700 : Colors.orange.shade700;
+    final bg    = available ? Colors.green.shade50  : Colors.orange.shade50;
+    final icon  = available ? Icons.check_circle_outline : Icons.people_alt_outlined;
+    final label = available
+        ? 'Available now — no wait'
+        : '$queueSize ${queueSize == 1 ? 'person' : 'people'} ahead · ~$waitMins min wait';
+
+    return Padding(
+      padding: const EdgeInsets.only(top: 8),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 14, color: color),
+            const SizedBox(width: 6),
+            Text(label,
+                style: TextStyle(
+                    fontSize: 12,
+                    color: color,
+                    fontWeight: FontWeight.w600)),
+          ],
+        ),
       ),
     );
   }
@@ -447,6 +713,346 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
           }).toList(),
         ),
       ],
+    );
+  }
+
+  // ── Barbers section ─────────────────────────────────────────────────────────
+
+  Widget _buildBarbersSection(Color primary) {
+    final barbers = (_detail!['barbers'] as List).cast<Map<String, dynamic>>();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(Icons.people_outline, size: 18, color: primary),
+          const SizedBox(width: 8),
+          const Text('Our Barbers',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        ]),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 130,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: barbers.length,
+            separatorBuilder: (_, si) => const SizedBox(width: 12),
+            itemBuilder: (context, i) {
+              final b = barbers[i];
+              final name = b['name'] as String? ?? 'Barber';
+              final spec = b['specialization'] as String?;
+              final photo = b['photoUrl'] as String?;
+              final exp = (b['experience'] as num?)?.toInt() ?? 0;
+              final available = b['isAvailable'] as bool? ?? true;
+              final leaveUntil = b['leaveUntil'] as String?;
+              final breakUntil = b['breakUntil'] as String?;
+
+              final statusDot = leaveUntil != null
+                  ? Colors.red.shade500
+                  : breakUntil != null
+                      ? Colors.orange.shade500
+                      : available
+                          ? Colors.green.shade500
+                          : Colors.grey.shade400;
+
+              return GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => BarberProfileScreen(
+                      barberId: b['id'] as String,
+                      barberName: name,
+                    ),
+                  ),
+                ),
+                child: Container(
+                  width: 100,
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(color: Colors.grey.shade200),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.04),
+                        blurRadius: 6,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Stack(
+                        children: [
+                          _barberAvatarSmall(photo, name, primary),
+                          Positioned(
+                            bottom: 0, right: 0,
+                            child: Container(
+                              width: 10, height: 10,
+                              decoration: BoxDecoration(
+                                color: statusDot,
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white, width: 1.5),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 7),
+                      Text(name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.bold)),
+                      if (spec != null && spec.isNotEmpty)
+                        Text(spec,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                                fontSize: 10, color: Colors.grey.shade500)),
+                      Text(exp == 0 ? 'New' : '${exp}yr exp',
+                          style: TextStyle(
+                              fontSize: 10, color: primary,
+                              fontWeight: FontWeight.w500)),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _barberAvatarSmall(String? photo, String name, Color primary) {
+    if (photo != null && photo.isNotEmpty) {
+      final url = photo.startsWith('http') ? photo : '${ApiService.baseUrl}$photo';
+      return CircleAvatar(
+        radius: 28,
+        backgroundImage: NetworkImage(url),
+        backgroundColor: primary.withValues(alpha: 0.1),
+        onBackgroundImageError: (e, s) {},
+      );
+    }
+    return CircleAvatar(
+      radius: 28,
+      backgroundColor: primary.withValues(alpha: 0.1),
+      child: Text(
+        name.isNotEmpty ? name[0].toUpperCase() : '?',
+        style: TextStyle(
+            fontSize: 18, fontWeight: FontWeight.bold, color: primary),
+      ),
+    );
+  }
+
+  // ── Portfolio section ────────────────────────────────────────────────────────
+
+  Widget _buildPortfolioSection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(Icons.photo_library_outlined, size: 18, color: Colors.grey.shade700),
+          const SizedBox(width: 8),
+          const Text('Portfolio',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+          const SizedBox(width: 6),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+            decoration: BoxDecoration(
+              color: Colors.grey.shade100,
+              borderRadius: BorderRadius.circular(10),
+            ),
+            child: Text('${_portfolio.length}',
+                style: TextStyle(
+                    fontSize: 11, color: Colors.grey.shade600,
+                    fontWeight: FontWeight.bold)),
+          ),
+        ]),
+        const SizedBox(height: 10),
+        SizedBox(
+          height: 120,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: _portfolio.length,
+            separatorBuilder: (_, si) => const SizedBox(width: 8),
+            itemBuilder: (context, i) {
+              final item = _portfolio[i] as Map<String, dynamic>;
+              final type = item['type'] as String? ?? 'portfolio';
+              final photoUrl = item['photoUrl'] as String? ?? '';
+              final beforeUrl = item['beforeUrl'] as String?;
+              final caption = item['caption'] as String?;
+              final isBeforeAfter = type == 'before_after' && beforeUrl != null;
+
+              return GestureDetector(
+                onTap: () => _showPortfolioViewer(item),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: SizedBox(
+                    width: isBeforeAfter ? 200 : 110,
+                    child: isBeforeAfter
+                        ? _beforeAfterCard(beforeUrl, photoUrl, caption)
+                        : Stack(
+                            fit: StackFit.expand,
+                            children: [
+                              _portfolioImage(photoUrl),
+                              if (caption != null && caption.isNotEmpty)
+                                Positioned(
+                                  bottom: 0, left: 0, right: 0,
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(
+                                        horizontal: 6, vertical: 4),
+                                    color: Colors.black45,
+                                    child: Text(caption,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                            fontSize: 10, color: Colors.white)),
+                                  ),
+                                ),
+                            ],
+                          ),
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _beforeAfterCard(String beforeUrl, String afterUrl, String? caption) {
+    return Row(children: [
+      Expanded(
+        child: Stack(fit: StackFit.expand, children: [
+          _portfolioImage(beforeUrl),
+          Positioned(
+            bottom: 0, left: 0, right: 0,
+            child: Container(
+              color: Colors.black54,
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: const Text('Before',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 10, color: Colors.white,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ]),
+      ),
+      Container(width: 2, color: Colors.white),
+      Expanded(
+        child: Stack(fit: StackFit.expand, children: [
+          _portfolioImage(afterUrl),
+          Positioned(
+            bottom: 0, left: 0, right: 0,
+            child: Container(
+              color: Colors.black54,
+              padding: const EdgeInsets.symmetric(vertical: 3),
+              child: const Text('After',
+                  textAlign: TextAlign.center,
+                  style: TextStyle(fontSize: 10, color: Colors.white,
+                      fontWeight: FontWeight.w600)),
+            ),
+          ),
+        ]),
+      ),
+    ]);
+  }
+
+  Widget _portfolioImage(String url) {
+    if (url.isEmpty) {
+      return Container(
+        color: Colors.grey.shade200,
+        child: Icon(Icons.image_outlined, color: Colors.grey.shade400),
+      );
+    }
+    final fullUrl = url.startsWith('http') ? url : '${ApiService.baseUrl}$url';
+    return Image.network(fullUrl, fit: BoxFit.cover,
+        errorBuilder: (context, error, stack) => Container(
+          color: Colors.grey.shade200,
+          child: Icon(Icons.image_outlined, color: Colors.grey.shade400),
+        ));
+  }
+
+  void _showPortfolioViewer(Map<String, dynamic> item) {
+    final type = item['type'] as String? ?? 'portfolio';
+    final photoUrl = item['photoUrl'] as String? ?? '';
+    final beforeUrl = item['beforeUrl'] as String?;
+    final caption = item['caption'] as String?;
+    final isBeforeAfter = type == 'before_after' && beforeUrl != null;
+
+    showDialog(
+      context: context,
+      builder: (_) => Dialog(
+        backgroundColor: Colors.black,
+        insetPadding: EdgeInsets.zero,
+        child: Stack(children: [
+          if (isBeforeAfter)
+            Row(children: [
+              Expanded(
+                child: Stack(fit: StackFit.expand, children: [
+                  InteractiveViewer(child: _portfolioImage(beforeUrl)),
+                  const Positioned(
+                    bottom: 60, left: 0, right: 0,
+                    child: Text('Before',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 14,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ]),
+              ),
+              Container(width: 2, color: Colors.white24),
+              Expanded(
+                child: Stack(fit: StackFit.expand, children: [
+                  InteractiveViewer(child: _portfolioImage(photoUrl)),
+                  const Positioned(
+                    bottom: 60, left: 0, right: 0,
+                    child: Text('After',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                            color: Colors.white70, fontSize: 14,
+                            fontWeight: FontWeight.bold)),
+                  ),
+                ]),
+              ),
+            ])
+          else
+            SizedBox.expand(
+              child: InteractiveViewer(child: _portfolioImage(photoUrl)),
+            ),
+          Positioned(
+            top: 40, right: 16,
+            child: GestureDetector(
+              onTap: () => Navigator.pop(context),
+              child: Container(
+                padding: const EdgeInsets.all(8),
+                decoration: const BoxDecoration(
+                    color: Colors.black54, shape: BoxShape.circle),
+                child: const Icon(Icons.close, color: Colors.white, size: 20),
+              ),
+            ),
+          ),
+          if (caption != null && caption.isNotEmpty)
+            Positioned(
+              bottom: 40, left: 16, right: 16,
+              child: Container(
+                padding: const EdgeInsets.symmetric(
+                    horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.black54,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(caption,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                        color: Colors.white, fontSize: 13)),
+              ),
+            ),
+        ]),
+      ),
     );
   }
 
@@ -641,6 +1247,37 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // ── Priority access banner (Basic / Pro members) ───────────
+            if (_customerPlan == 'basic' || _customerPlan == 'pro')
+              Padding(
+                padding: const EdgeInsets.only(bottom: 10),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 10, vertical: 7),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFFE8F5E9),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: const Color(0xFF66BB6A)),
+                  ),
+                  child: Row(children: [
+                    const Icon(Icons.rocket_launch_outlined,
+                        size: 14, color: Color(0xFF2E7D32)),
+                    const SizedBox(width: 6),
+                    Expanded(
+                      child: Text(
+                        _customerPlan == 'pro'
+                            ? 'Pro Member — priority slot access & exclusive deals.'
+                            : 'Basic Member — priority slot access active.',
+                        style: const TextStyle(
+                            fontSize: 12,
+                            color: Color(0xFF2E7D32),
+                            fontWeight: FontWeight.w500),
+                      ),
+                    ),
+                  ]),
+                ),
+              ),
+
             // ── Free plan limit notice ──────────────────────────────────
             if (_planLimitReached)
               Padding(
@@ -699,10 +1336,10 @@ class _SalonDetailScreenState extends State<SalonDetailScreen> {
                     ),
                     child: Text(
                       _planLimitReached
-                          ? 'Booking Limit Reached'
+                          ? 'Upgrade to Book More'
                           : hasSelection
-                              ? 'Choose Time Slot'
-                              : 'Select Services to Book',
+                              ? 'Reserve Your Chair'
+                              : 'What\'s your vibe today?',
                       style: const TextStyle(
                           fontSize: 15, fontWeight: FontWeight.bold),
                     ),
@@ -725,12 +1362,16 @@ class _SlotPickerSheet extends StatefulWidget {
   /// Parsed list of open days, e.g. ['Mon','Tue','Wed','Thu','Fri','Sat'].
   /// Empty list means no restriction (treat every day as open).
   final List<String> workingDays;
+  final String? closingTime;
+  final String contactNumber;
   final void Function(DateTime date, Map<String, dynamic> slot) onSlotSelected;
 
   const _SlotPickerSheet({
     required this.salonId,
     required this.initialDate,
     required this.workingDays,
+    this.closingTime,
+    this.contactNumber = '',
     required this.onSlotSelected,
   });
 
@@ -742,6 +1383,7 @@ class _SlotPickerSheetState extends State<_SlotPickerSheet> {
   late DateTime _selectedDate;
   List<dynamic> _slots = [];
   bool _loadingSlots = false;
+  String? _tappedSlotTime; // tracks the briefly-highlighted slot
 
   // Returns true when workingDays is unconfigured OR the day is in the list.
   bool _isWorkingDay(DateTime d) {
@@ -781,11 +1423,84 @@ class _SlotPickerSheetState extends State<_SlotPickerSheet> {
     if (mounted) setState(() { _slots = slots; _loadingSlots = false; });
   }
 
+  bool _isPastClosingTime() {
+    final now = DateTime.now();
+    final isToday = _selectedDate.year == now.year &&
+        _selectedDate.month == now.month &&
+        _selectedDate.day == now.day;
+    if (!isToday) return false;
+    final ct = widget.closingTime;
+    if (ct == null || !ct.contains(':')) return false;
+    final parts = ct.split(':');
+    final cH = int.tryParse(parts[0]) ?? 23;
+    final cM = int.tryParse(parts[1]) ?? 59;
+    return now.isAfter(DateTime(now.year, now.month, now.day, cH, cM));
+  }
+
   Widget _buildEmptyState() {
-    // If the selected day is not in the working-days list, show a specific
-    // "closed" message rather than the generic "no slots" one.
     final isClosed = !_isWorkingDay(_selectedDate);
-    final dayName  = DateFormat('EEEE').format(_selectedDate); // e.g. "Sunday"
+    final dayName  = DateFormat('EEEE').format(_selectedDate);
+    final pastClose = _isPastClosingTime();
+
+    if (pastClose) {
+      return Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(Icons.store_outlined, size: 44, color: Colors.grey.shade300),
+              const SizedBox(height: 12),
+              const Text(
+                "Online slots are closed for today",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600),
+              ),
+              const SizedBox(height: 6),
+              const Text(
+                "Give them a quick call — they might still fit you in.",
+                textAlign: TextAlign.center,
+                style: TextStyle(fontSize: 13, color: Colors.grey),
+              ),
+              if (widget.contactNumber.isNotEmpty) ...[
+                const SizedBox(height: 16),
+                GestureDetector(
+                  onTap: () async {
+                    final uri = Uri.parse('tel:${widget.contactNumber}');
+                    if (await canLaunchUrl(uri)) launchUrl(uri);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 12),
+                    decoration: BoxDecoration(
+                      color: Colors.green.shade50,
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.green.shade200),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.phone_outlined,
+                            color: Colors.green.shade700, size: 18),
+                        const SizedBox(width: 8),
+                        Text(
+                          widget.contactNumber,
+                          style: TextStyle(
+                            color: Colors.green.shade700,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 14,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
 
     return Center(
       child: Padding(
@@ -801,8 +1516,8 @@ class _SlotPickerSheetState extends State<_SlotPickerSheet> {
             const SizedBox(height: 12),
             Text(
               isClosed
-                  ? 'Salon is closed on $dayName'
-                  : 'No slots available for this date',
+                  ? 'Closed on $dayName'
+                  : 'Fully booked for this date',
               textAlign: TextAlign.center,
               style: const TextStyle(
                   fontSize: 15, fontWeight: FontWeight.w600),
@@ -810,8 +1525,8 @@ class _SlotPickerSheetState extends State<_SlotPickerSheet> {
             const SizedBox(height: 6),
             Text(
               isClosed
-                  ? 'Please choose another day from the date strip above.'
-                  : 'All slots are booked for this date. Try a different day.',
+                  ? 'Choose another day from the strip above.'
+                  : 'All chairs are taken — try a different day.',
               textAlign: TextAlign.center,
               style: TextStyle(fontSize: 13, color: Colors.grey.shade500),
             ),
@@ -847,7 +1562,7 @@ class _SlotPickerSheetState extends State<_SlotPickerSheet> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             child: Row(children: [
-              const Text('Pick a Time Slot',
+              const Text('Choose your chair time',
                   style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
             ]),
           ),
@@ -947,7 +1662,19 @@ class _SlotPickerSheetState extends State<_SlotPickerSheet> {
           // ── Slots grid ─────────────────────────────────────────────────
           Expanded(
             child: _loadingSlots
-                ? const Center(child: CircularProgressIndicator())
+                ? GridView.builder(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 16, vertical: 8),
+                    gridDelegate:
+                        const SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: 4,
+                      childAspectRatio: 1.8,
+                      crossAxisSpacing: 10,
+                      mainAxisSpacing: 10,
+                    ),
+                    itemCount: 16,
+                    itemBuilder: (_, i) => const _SlotSkeleton(),
+                  )
                 : _slots.isEmpty
                     ? _buildEmptyState()
                     : GridView.builder(
@@ -966,42 +1693,65 @@ class _SlotPickerSheetState extends State<_SlotPickerSheet> {
                           final available = slot['available'] as bool? ?? false;
                           final time      = slot['displayTime'] as String? ?? '';
                           final remaining = (slot['remainingSlots'] as num?)?.toInt() ?? 0;
+                          final isTapped  = _tappedSlotTime == time;
 
                           return GestureDetector(
-                            onTap: available
-                                ? () => widget.onSlotSelected(
-                                    _selectedDate, slot)
-                                : null,
-                            child: AnimatedContainer(
+                            onTap: available ? () async {
+                              HapticFeedback.lightImpact();
+                              setState(() => _tappedSlotTime = time);
+                              await Future.delayed(
+                                  const Duration(milliseconds: 180));
+                              if (mounted) {
+                                setState(() => _tappedSlotTime = null);
+                                widget.onSlotSelected(_selectedDate, slot);
+                              }
+                            } : null,
+                            child: AnimatedScale(
+                              scale: isTapped ? 0.90 : 1.0,
                               duration: const Duration(milliseconds: 120),
-                              decoration: BoxDecoration(
-                                color: available
-                                    ? primary.withValues(alpha: 0.08)
-                                    : Colors.grey.shade100,
-                                borderRadius: BorderRadius.circular(10),
-                                border: Border.all(
-                                  color: available
-                                      ? primary.withValues(alpha: 0.35)
-                                      : Colors.grey.shade200,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 120),
+                                decoration: BoxDecoration(
+                                  color: isTapped
+                                      ? primary
+                                      : available
+                                          ? primary.withValues(alpha: 0.08)
+                                          : Colors.grey.shade100,
+                                  borderRadius: BorderRadius.circular(10),
+                                  border: Border.all(
+                                    color: available
+                                        ? primary.withValues(alpha: 0.35)
+                                        : Colors.grey.shade200,
+                                  ),
+                                  boxShadow: isTapped
+                                      ? [BoxShadow(
+                                          color: primary.withValues(alpha: 0.3),
+                                          blurRadius: 8,
+                                          offset: const Offset(0, 2))]
+                                      : [],
                                 ),
-                              ),
-                              child: Column(
-                                mainAxisAlignment: MainAxisAlignment.center,
-                                children: [
-                                  Text(time,
-                                      style: TextStyle(
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w700,
-                                        color: available
-                                            ? primary
-                                            : Colors.grey.shade400,
-                                      )),
-                                  if (available && remaining < 3)
-                                    Text('$remaining left',
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(time,
                                         style: TextStyle(
-                                            fontSize: 9,
-                                            color: Colors.orange.shade600)),
-                                ],
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                          color: isTapped
+                                              ? Colors.white
+                                              : available
+                                                  ? primary
+                                                  : Colors.grey.shade400,
+                                        )),
+                                    if (available && remaining < 3)
+                                      Text('$remaining left',
+                                          style: TextStyle(
+                                              fontSize: 9,
+                                              color: isTapped
+                                                  ? Colors.white70
+                                                  : Colors.orange.shade600)),
+                                  ],
+                                ),
                               ),
                             ),
                           );
@@ -1115,6 +1865,51 @@ class _ReviewsSheet extends StatelessWidget {
           ),
         ),
       ]),
+    );
+  }
+}
+
+// ── Slot skeleton chip ────────────────────────────────────────────────────────
+
+class _SlotSkeleton extends StatefulWidget {
+  const _SlotSkeleton();
+
+  @override
+  State<_SlotSkeleton> createState() => _SlotSkeletonState();
+}
+
+class _SlotSkeletonState extends State<_SlotSkeleton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 900),
+    )..repeat(reverse: true);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, child) => Container(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(10),
+          color: Color.lerp(
+              Colors.grey.shade200, Colors.grey.shade100, _anim.value),
+        ),
+      ),
     );
   }
 }

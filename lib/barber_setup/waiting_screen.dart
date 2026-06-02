@@ -1,7 +1,7 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:no_wait_app/barber_setup/barber_home_screen.dart';
-import 'package:no_wait_app/main.dart';
+import 'package:no_wait_app/role_selection_screen.dart';
 import 'package:no_wait_app/services/api_service.dart';
 
 // Update with real support number

@@ -38,9 +38,10 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
     setState(() => _refreshing = true);
     try {
       final result = await ApiService.getMyBookingsPaged(page: 1, limit: 50);
-      final list   = (result['bookings'] as List?)?.cast<Map<String, dynamic>>() ?? [];
-      final id     = _booking['id'] as String?;
-      final updated = list.firstWhere(
+      final list = (result['bookings'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final walkIns = (result['walkIns'] as List?)?.cast<Map<String, dynamic>>() ?? [];
+      final id = _booking['id'] as String?;
+      final updated = [...list, ...walkIns].firstWhere(
         (b) => b['id'] == id,
         orElse: () => <String, dynamic>{},
       );
@@ -326,6 +327,28 @@ class _BookingDetailScreenState extends State<BookingDetailScreen> {
                 ],
               ]),
             ),
+
+            // ── Offline booking badge ────────────────────────────────────
+            if (_booking['type'] == 'walk_in') ...[
+              const SizedBox(height: 10),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                decoration: BoxDecoration(
+                  color: Colors.purple.shade50,
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.purple.shade200),
+                ),
+                child: Row(children: [
+                  Icon(Icons.store_outlined, size: 15, color: Colors.purple.shade700),
+                  const SizedBox(width: 8),
+                  Text('Walk-in / Offline Booking',
+                      style: TextStyle(
+                          fontSize: 13,
+                          color: Colors.purple.shade700,
+                          fontWeight: FontWeight.w600)),
+                ]),
+              ),
+            ],
 
             // ── Booking OTP (shown only for confirmed upcoming bookings) ────
             if (_bookingOtp != null) ...[

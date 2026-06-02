@@ -1,9 +1,10 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart'
     show FilteringTextInputFormatter, HapticFeedback, LengthLimitingTextInputFormatter, SystemNavigator;
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 import 'package:intl/intl.dart';
-import 'package:no_wait_app/main.dart';
+import 'package:no_wait_app/role_selection_screen.dart';
 import 'package:no_wait_app/services/api_service.dart';
 import 'package:no_wait_app/widgets/loading_widget.dart';
 import 'package:no_wait_app/widgets/app_snackbar.dart';
@@ -13,7 +14,6 @@ import 'package:no_wait_app/map_screen.dart';
 import 'package:no_wait_app/services/location_prefs.dart';
 import 'professional_services_screen.dart';
 import 'manage_barbers_screen.dart';
-import 'manage_offers_screen.dart';
 import 'package:no_wait_app/settings_screen.dart';
 
 double _asDouble(dynamic value, [double fallback = 0.0]) {
@@ -585,15 +585,6 @@ class _ProfessionalHomeScreenState extends State<ProfessionalHomeScreen> {
                   MaterialPageRoute(
                       builder: (_) => const ManageBarbersScreen()),
                 ).then((_) => _fetchData()),
-              ),
-              actionCard(
-                icon: Icons.local_offer_outlined,
-                title: 'Offers',
-                onTap: () => Navigator.push(
-                  context,
-                  MaterialPageRoute(
-                      builder: (_) => const ManageOffersScreen()),
-                ),
               ),
               actionCard(
                   icon: Icons.content_cut,
@@ -2522,6 +2513,21 @@ class _ProAppointmentsTabState extends State<_ProAppointmentsTab> {
     }
   }
 
+  Future<void> _completeWalkIn(String walkInId) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ApiService.updateWalkIn(walkInId, {'status': 'completed'});
+      if (!mounted) return;
+      HapticFeedback.mediumImpact();
+      AppSnackbar.successM(messenger, 'Offline appointment marked as completed.');
+      _load();
+    } on ApiException catch (e) {
+      if (mounted) AppSnackbar.errorM(messenger, e.message);
+    } catch (_) {
+      if (mounted) AppSnackbar.errorM(messenger, 'Failed to complete appointment.');
+    }
+  }
+
   List<Map<String, dynamic>> get _visibleBookings {
     final now  = DateTime.now();
     final tod  = DateTime(now.year, now.month, now.day);
@@ -2552,6 +2558,22 @@ class _ProAppointmentsTabState extends State<_ProAppointmentsTab> {
     }).toList();
   }
 
+  void _showOfflineBookingSheet() {
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _OfflineBookingSheet(
+        onCreated: () {
+          _load();
+          final messenger = ScaffoldMessenger.of(context);
+          AppSnackbar.successM(
+              messenger, 'Offline booking created — slot is now blocked.');
+        },
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
@@ -2564,6 +2586,32 @@ class _ProAppointmentsTabState extends State<_ProAppointmentsTab> {
 
     return Column(
       children: [
+        // ── Header: title + offline booking button ─────────────────
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 12, 0),
+          child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text('Appointments',
+                  style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+              TextButton.icon(
+                onPressed: _showOfflineBookingSheet,
+                icon: const Icon(Icons.add, size: 16),
+                label: const Text('Offline Booking',
+                    style: TextStyle(fontSize: 12)),
+                style: TextButton.styleFrom(
+                  foregroundColor: primary,
+                  backgroundColor: primary.withValues(alpha: 0.08),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10)),
+                ),
+              ),
+            ],
+          ),
+        ),
+
         // ── Time-range filter chips ────────────────────────────────────
         SingleChildScrollView(
           scrollDirection: Axis.horizontal,
@@ -2752,6 +2800,7 @@ class _ProAppointmentsTabState extends State<_ProAppointmentsTab> {
     final status      = b['status'] as String?;
     final statusColor = _statusColor(status);
     final id          = b['id'] as String;
+    final isWalkIn    = b['type'] == 'walk_in';
     final customer    = b['customerName'] as String? ?? 'Customer';
     final dt          = DateTime.tryParse(b['scheduledAt'] as String? ?? '');
     final timeStr     = dt != null
@@ -2793,6 +2842,17 @@ class _ProAppointmentsTabState extends State<_ProAppointmentsTab> {
               Text(customer,
                   style: const TextStyle(
                       fontSize: 14, fontWeight: FontWeight.bold)),
+              if (isWalkIn)
+                Row(children: [
+                  Icon(Icons.person_add_alt_1_outlined,
+                      size: 11, color: Colors.deepPurple.shade400),
+                  const SizedBox(width: 3),
+                  Text('Offline booking',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: Colors.deepPurple.shade400,
+                          fontWeight: FontWeight.w500)),
+                ]),
             ]),
           ),
           Container(
@@ -2884,18 +2944,31 @@ class _ProAppointmentsTabState extends State<_ProAppointmentsTab> {
           const SizedBox(height: 12),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton.icon(
-              icon: const Icon(Icons.vpn_key_outlined, size: 16),
-              label: const Text('Enter Customer OTP to Start'),
-              onPressed: () => _enterOtp(id),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.blue.shade600,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 10),
-                shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10)),
-              ),
-            ),
+            child: isWalkIn
+                ? OutlinedButton.icon(
+                    icon: const Icon(Icons.check_circle_outline, size: 16),
+                    label: const Text('Mark Complete'),
+                    onPressed: () => _completeWalkIn(id),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.green.shade700,
+                      side: BorderSide(color: Colors.green.shade400),
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  )
+                : ElevatedButton.icon(
+                    icon: const Icon(Icons.vpn_key_outlined, size: 16),
+                    label: const Text('Enter Customer OTP to Start'),
+                    onPressed: () => _enterOtp(id),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.blue.shade600,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 10),
+                      shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10)),
+                    ),
+                  ),
           ),
         ] else if (status == 'in_progress') ...[
           const SizedBox(height: 12),
@@ -2924,7 +2997,7 @@ class _ProAppointmentsTabState extends State<_ProAppointmentsTab> {
                 icon: const Icon(
                     Icons.check_circle_outline, size: 16),
                 label: const Text('Mark Complete'),
-                onPressed: () => _complete(id),
+                onPressed: () => isWalkIn ? _completeWalkIn(id) : _complete(id),
                 style: OutlinedButton.styleFrom(
                   foregroundColor: Colors.green.shade700,
                   side: BorderSide(color: Colors.green.shade400),
@@ -3395,8 +3468,11 @@ class _ProSubscriptionCard extends StatefulWidget {
 
 class _ProSubscriptionCardState extends State<_ProSubscriptionCard> {
   Map<String, dynamic>? _sub;
-  bool _loading = true;
+  bool _loading    = true;
   bool _cancelling = false;
+  int  _monthlyBookingCount = 0;
+
+  static const _kFreeMonthlyLimit = 50;
 
   @override
   void initState() {
@@ -3406,8 +3482,17 @@ class _ProSubscriptionCardState extends State<_ProSubscriptionCard> {
 
   Future<void> _load() async {
     setState(() => _loading = true);
-    final data = await ApiService.getProfessionalSubscription();
-    if (mounted) setState(() { _sub = data; _loading = false; });
+    final results = await Future.wait([
+      ApiService.getProfessionalSubscription(),
+      ApiService.getProfessionalMonthlyBookingCount(),
+    ]);
+    if (mounted) {
+      setState(() {
+        _sub = results[0] as Map<String, dynamic>?;
+        _monthlyBookingCount = results[1] as int;
+        _loading = false;
+      });
+    }
   }
 
   String _planLabel(String? plan) {
@@ -3584,6 +3669,73 @@ class _ProSubscriptionCardState extends State<_ProSubscriptionCard> {
                 ),
               ),
           ]),
+        ),
+      ],
+
+      // ── Monthly booking usage (free plan only) ───────────────────────────
+      if (!_isOnPaidPlan) ...[
+        const SizedBox(height: 16),
+        Container(
+          padding: const EdgeInsets.all(14),
+          decoration: BoxDecoration(
+            color: Colors.grey.shade50,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: Colors.grey.shade200),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(children: [
+                const Icon(Icons.bar_chart_rounded,
+                    size: 16, color: Colors.black54),
+                const SizedBox(width: 6),
+                const Expanded(
+                  child: Text('Monthly Bookings (Free Plan)',
+                      style: TextStyle(
+                          fontSize: 13, fontWeight: FontWeight.w600)),
+                ),
+                Text(
+                  '$_monthlyBookingCount / $_kFreeMonthlyLimit',
+                  style: TextStyle(
+                      fontSize: 13,
+                      fontWeight: FontWeight.bold,
+                      color: _monthlyBookingCount >= _kFreeMonthlyLimit
+                          ? Colors.red.shade600
+                          : Colors.black87),
+                ),
+              ]),
+              const SizedBox(height: 8),
+              ClipRRect(
+                borderRadius: BorderRadius.circular(4),
+                child: LinearProgressIndicator(
+                  value: (_monthlyBookingCount / _kFreeMonthlyLimit)
+                      .clamp(0.0, 1.0),
+                  minHeight: 6,
+                  backgroundColor: Colors.grey.shade200,
+                  valueColor: AlwaysStoppedAnimation<Color>(
+                    _monthlyBookingCount >= _kFreeMonthlyLimit
+                        ? Colors.red.shade400
+                        : const Color(0xFFFF8F00),
+                  ),
+                ),
+              ),
+              if (_monthlyBookingCount >= _kFreeMonthlyLimit) ...[
+                const SizedBox(height: 6),
+                Text(
+                  'Booking limit reached. Upgrade to accept more this month.',
+                  style: TextStyle(
+                      fontSize: 11, color: Colors.red.shade600),
+                ),
+              ] else ...[
+                const SizedBox(height: 6),
+                Text(
+                  '${_kFreeMonthlyLimit - _monthlyBookingCount} bookings remaining this month.',
+                  style: TextStyle(
+                      fontSize: 11, color: Colors.grey.shade600),
+                ),
+              ],
+            ],
+          ),
         ),
       ],
 
@@ -4156,6 +4308,514 @@ class _OtpVerifyDialogState extends State<_OtpVerifyDialog> {
             ],
           ),
         ),
+    );
+  }
+}
+
+// ── Offline / Walk-in booking sheet ──────────────────────────────────────────
+
+class _OfflineBookingSheet extends StatefulWidget {
+  final VoidCallback onCreated;
+  const _OfflineBookingSheet({required this.onCreated});
+
+  @override
+  State<_OfflineBookingSheet> createState() => _OfflineBookingSheetState();
+}
+
+class _OfflineBookingSheetState extends State<_OfflineBookingSheet> {
+  final _phoneCtrl = TextEditingController();
+  final _nameCtrl  = TextEditingController();
+  final _notesCtrl = TextEditingController();
+
+  DateTime  _selectedDate = DateTime.now();
+  TimeOfDay _selectedTime = TimeOfDay.now();
+
+  List<dynamic> _services = [];
+  final Map<String, Map<String, dynamic>> _selectedServices = {};
+  bool _loadingServices = false;
+  bool _submitting = false;
+  String? _salonContactNumber;
+
+  // Phone auto-fill state
+  Timer? _phoneLookupTimer;
+  bool _lookingUpPhone = false;
+  bool _nameAutoFilled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadServices();
+    // Default to next round-hour so the slot is always in the future
+    final now = DateTime.now();
+    _selectedTime = TimeOfDay(
+        hour: (now.minute > 5 ? now.hour + 1 : now.hour).clamp(0, 23),
+        minute: 0);
+    _phoneCtrl.addListener(_onPhoneChanged);
+  }
+
+  @override
+  void dispose() {
+    _phoneLookupTimer?.cancel();
+    _phoneCtrl.removeListener(_onPhoneChanged);
+    _phoneCtrl.dispose();
+    _nameCtrl.dispose();
+    _notesCtrl.dispose();
+    super.dispose();
+  }
+
+  void _onPhoneChanged() {
+    final digits = _phoneCtrl.text.replaceAll(RegExp(r'\D'), '');
+    if (digits.length < 10) {
+      if (_nameAutoFilled) {
+        setState(() { _nameAutoFilled = false; });
+      }
+      _phoneLookupTimer?.cancel();
+      return;
+    }
+    _phoneLookupTimer?.cancel();
+    _phoneLookupTimer = Timer(const Duration(milliseconds: 600), () async {
+      if (!mounted) return;
+      setState(() => _lookingUpPhone = true);
+      try {
+        final result = await ApiService.lookupUserByPhone(digits);
+        if (!mounted) return;
+        if (result != null) {
+          final name = result['name'] as String? ?? '';
+          if (name.isNotEmpty) {
+            _nameCtrl.text = name;
+            setState(() { _nameAutoFilled = true; _lookingUpPhone = false; });
+            return;
+          }
+        }
+        setState(() { _nameAutoFilled = false; _lookingUpPhone = false; });
+      } on ApiException catch (e) {
+        if (!mounted) return;
+        setState(() { _nameAutoFilled = false; _lookingUpPhone = false; });
+        // Show the server's reason (professional account / own salon phone)
+        AppSnackbar.error(context, e.message);
+      } catch (_) {
+        if (mounted) setState(() { _nameAutoFilled = false; _lookingUpPhone = false; });
+      }
+    });
+  }
+
+  Future<void> _loadServices() async {
+    setState(() => _loadingServices = true);
+    try {
+      final config = await ApiService.getMySalonConfig();
+      final raw = config['services'] as List? ?? [];
+      setState(() {
+        _services = raw;
+        _salonContactNumber = config['contactNumber'] as String?;
+        _loadingServices = false;
+      });
+    } catch (_) {
+      setState(() => _loadingServices = false);
+    }
+  }
+
+  Future<void> _pickDate() async {
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: _selectedDate,
+      firstDate: DateTime.now(),
+      lastDate: DateTime.now().add(const Duration(days: 90)),
+    );
+    if (picked != null && mounted) setState(() => _selectedDate = picked);
+  }
+
+  Future<void> _pickTime() async {
+    final picked = await showTimePicker(
+      context: context,
+      initialTime: _selectedTime,
+    );
+    if (picked != null && mounted) setState(() => _selectedTime = picked);
+  }
+
+  void _toggleService(Map<String, dynamic> svc) {
+    final id = svc['id'] as String? ?? svc['serviceId'] as String? ?? '';
+    if (id.isEmpty) return;
+    setState(() {
+      if (_selectedServices.containsKey(id)) {
+        _selectedServices.remove(id);
+      } else {
+        _selectedServices[id] = svc;
+      }
+    });
+  }
+
+  Future<void> _submit() async {
+    final phone = _phoneCtrl.text.trim();
+    final name  = _nameCtrl.text.trim();
+    if (phone.isEmpty) {
+      AppSnackbar.error(context, 'Phone number is required');
+      return;
+    }
+    if (name.isEmpty) {
+      AppSnackbar.error(context, 'Customer name is required');
+      return;
+    }
+    if (_selectedServices.isEmpty) {
+      AppSnackbar.error(context, 'Please select at least one service');
+      return;
+    }
+    if (_salonContactNumber != null &&
+        phone.replaceAll(RegExp(r'\D'), '') ==
+            _salonContactNumber!.replaceAll(RegExp(r'\D'), '')) {
+      AppSnackbar.error(
+          context, "You can't create a booking under your own salon's phone number");
+      return;
+    }
+    setState(() => _submitting = true);
+    try {
+      final scheduled = DateTime(
+        _selectedDate.year, _selectedDate.month, _selectedDate.day,
+        _selectedTime.hour, _selectedTime.minute,
+      );
+      final services = _selectedServices.values.map((s) => {
+        'serviceId': s['id'] ?? s['serviceId'],
+        'serviceName': s['serviceName'] as String? ?? s['name'] as String? ?? '',
+        'price': (s['price'] as num? ?? 0).toDouble(),
+        'duration': (s['duration'] as num? ?? 30).toInt(),
+      }).toList();
+
+      await ApiService.addWalkIn({
+        'customerName': name,
+        'customerPhone': phone,
+        'services': services,
+        'scheduledAt': scheduled.toIso8601String(),
+        if (_notesCtrl.text.trim().isNotEmpty)
+          'notes': _notesCtrl.text.trim(),
+      });
+      if (!mounted) return;
+      Navigator.pop(context);
+      widget.onCreated();
+    } on ApiException catch (e) {
+      if (mounted) AppSnackbar.error(context, e.message);
+    } catch (_) {
+      if (mounted) AppSnackbar.error(context, 'Could not create booking. Try again.');
+    } finally {
+      if (mounted) setState(() => _submitting = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Container(
+      height: MediaQuery.of(context).size.height * 0.88,
+      decoration: const BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      child: Column(
+        children: [
+          Center(
+            child: Container(
+              margin: const EdgeInsets.only(top: 12, bottom: 8),
+              width: 40, height: 4,
+              decoration: BoxDecoration(
+                  color: Colors.grey.shade300,
+                  borderRadius: BorderRadius.circular(2)),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 12),
+            child: Row(children: [
+              Icon(Icons.person_add_outlined, color: primary, size: 20),
+              const SizedBox(width: 8),
+              const Expanded(
+                child: Text('New Offline Booking',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+              ),
+            ]),
+          ),
+          Divider(height: 1, color: Colors.grey.shade100),
+          Expanded(
+            child: _loadingServices
+                ? const Center(child: CircularProgressIndicator())
+                : SingleChildScrollView(
+                    padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Info banner
+                        Container(
+                          padding: const EdgeInsets.all(12),
+                          margin: const EdgeInsets.only(bottom: 20),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.shade50,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.blue.shade100),
+                          ),
+                          child: Row(children: [
+                            Icon(Icons.info_outline,
+                                size: 16, color: Colors.blue.shade700),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                'This slot will be instantly blocked in the app. '
+                                'App users will not be able to book it.',
+                                style: TextStyle(
+                                    fontSize: 12, color: Colors.blue.shade800),
+                              ),
+                            ),
+                          ]),
+                        ),
+
+                        _label('Phone Number *'),
+                        _fieldPhone(primary),
+                        const SizedBox(height: 16),
+
+                        _labelWithBadge('Customer Name *', _nameAutoFilled, _lookingUpPhone),
+                        _field(_nameCtrl, 'e.g. Rahul Sharma',
+                            TextInputType.name, primary),
+                        const SizedBox(height: 16),
+
+                        _label('Date & Time *'),
+                        Row(children: [
+                          Expanded(
+                            child: _pickerTile(
+                              icon: Icons.calendar_today_outlined,
+                              text: DateFormat('d MMM yyyy')
+                                  .format(_selectedDate),
+                              onTap: _pickDate,
+                              primary: primary,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _pickerTile(
+                              icon: Icons.access_time_outlined,
+                              text: _selectedTime.format(context),
+                              onTap: _pickTime,
+                              primary: primary,
+                            ),
+                          ),
+                        ]),
+                        const SizedBox(height: 16),
+
+                        if (_services.isNotEmpty) ...[
+                          _label('Services *'),
+                          Wrap(
+                            spacing: 8, runSpacing: 8,
+                            children: _services.map((s) {
+                              final svc = s as Map<String, dynamic>;
+                              final id = svc['id'] as String? ??
+                                  svc['serviceId'] as String? ?? '';
+                              final name = svc['serviceName'] as String? ??
+                                  svc['name'] as String? ?? '';
+                              final price =
+                                  (svc['price'] as num?)?.toInt() ?? 0;
+                              final sel = _selectedServices.containsKey(id);
+                              return GestureDetector(
+                                onTap: () => _toggleService(svc),
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 120),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 12, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: sel
+                                        ? primary
+                                        : Colors.grey.shade100,
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: sel
+                                          ? primary
+                                          : Colors.grey.shade300,
+                                    ),
+                                  ),
+                                  child: Text(
+                                    '$name · ₹$price',
+                                    style: TextStyle(
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.w500,
+                                      color: sel
+                                          ? Colors.white
+                                          : Colors.black87,
+                                    ),
+                                  ),
+                                ),
+                              );
+                            }).toList(),
+                          ),
+                          const SizedBox(height: 16),
+                        ],
+
+                        _label('Notes (optional)'),
+                        _field(
+                          _notesCtrl,
+                          'e.g. Regular customer, prefers fade',
+                          TextInputType.text,
+                          primary,
+                          maxLines: 2,
+                        ),
+                        const SizedBox(height: 28),
+
+                        SizedBox(
+                          width: double.infinity,
+                          height: 52,
+                          child: ElevatedButton(
+                            onPressed: _submitting ? null : _submit,
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: primary,
+                              foregroundColor: Colors.white,
+                              shape: RoundedRectangleBorder(
+                                  borderRadius: BorderRadius.circular(14)),
+                            ),
+                            child: _submitting
+                                ? const SizedBox(
+                                    width: 20,
+                                    height: 20,
+                                    child: CircularProgressIndicator(
+                                        color: Colors.white, strokeWidth: 2))
+                                : const Text(
+                                    'Block Slot & Save Booking',
+                                    style: TextStyle(
+                                        fontSize: 15,
+                                        fontWeight: FontWeight.bold),
+                                  ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _label(String text) => Padding(
+        padding: const EdgeInsets.only(bottom: 6),
+        child: Text(text,
+            style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      );
+
+  Widget _labelWithBadge(String text, bool autoFilled, bool loading) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: Row(
+        children: [
+          Text(text,
+              style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+          if (loading) ...[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 12, height: 12,
+              child: CircularProgressIndicator(strokeWidth: 1.5, color: primary),
+            ),
+          ] else if (autoFilled) ...[
+            const SizedBox(width: 6),
+            Icon(Icons.auto_awesome, size: 13, color: primary),
+            const SizedBox(width: 3),
+            Text('auto-filled',
+                style: TextStyle(fontSize: 11, color: primary, fontWeight: FontWeight.w500)),
+          ],
+        ],
+      ),
+    );
+  }
+
+  // Phone field with a small spinner suffix while looking up
+  Widget _fieldPhone(Color primary) {
+    return TextField(
+      controller: _phoneCtrl,
+      keyboardType: TextInputType.phone,
+      maxLines: 1,
+      style: const TextStyle(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: 'e.g. 9876543210',
+        hintStyle: TextStyle(color: Colors.grey.shade400, fontSize: 13),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+        isDense: true,
+        contentPadding:
+            const EdgeInsets.symmetric(vertical: 12, horizontal: 14),
+        suffixIcon: _lookingUpPhone
+            ? Padding(
+                padding: const EdgeInsets.all(12),
+                child: SizedBox(
+                  width: 16, height: 16,
+                  child: CircularProgressIndicator(
+                      strokeWidth: 1.8, color: primary),
+                ),
+              )
+            : null,
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.grey.shade200)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.grey.shade200)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: primary.withValues(alpha: 0.5))),
+      ),
+    );
+  }
+
+  Widget _field(TextEditingController ctrl, String hint,
+      TextInputType kbType, Color primary,
+      {int maxLines = 1}) {
+    return TextField(
+      controller: ctrl,
+      keyboardType: kbType,
+      maxLines: maxLines,
+      style: const TextStyle(fontSize: 14),
+      decoration: InputDecoration(
+        hintText: hint,
+        hintStyle:
+            TextStyle(color: Colors.grey.shade400, fontSize: 13),
+        filled: true,
+        fillColor: Colors.grey.shade50,
+        isDense: true,
+        contentPadding: const EdgeInsets.symmetric(
+            vertical: 12, horizontal: 14),
+        border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.grey.shade200)),
+        enabledBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(color: Colors.grey.shade200)),
+        focusedBorder: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide:
+                BorderSide(color: primary.withValues(alpha: 0.5))),
+      ),
+    );
+  }
+
+  Widget _pickerTile({
+    required IconData icon,
+    required String text,
+    required VoidCallback onTap,
+    required Color primary,
+  }) {
+    return GestureDetector(
+      onTap: onTap,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        decoration: BoxDecoration(
+          color: primary.withValues(alpha: 0.06),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: primary.withValues(alpha: 0.25)),
+        ),
+        child: Row(children: [
+          Icon(icon, size: 16, color: primary),
+          const SizedBox(width: 6),
+          Expanded(
+            child: Text(text,
+                style: TextStyle(
+                    fontSize: 13,
+                    fontWeight: FontWeight.w500,
+                    color: primary),
+                overflow: TextOverflow.ellipsis),
+          ),
+        ]),
+      ),
     );
   }
 }

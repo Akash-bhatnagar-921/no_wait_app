@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:no_wait_app/admin/pages/admin_user_detail_page.dart';
 import 'package:no_wait_app/services/api_service.dart';
-import 'package:no_wait_app/widgets/app_snackbar.dart';
 
 const Color _p = Color(0xFF1565C0);
 
@@ -15,6 +15,9 @@ class AdminUsersTab extends StatefulWidget {
 class _AdminUsersTabState extends State<AdminUsersTab> {
   final _searchCtrl = TextEditingController();
   String _role = '';
+  String _dateFilter = '';
+  DateTime? _customFrom;
+  DateTime? _customTo;
   List<dynamic> _users = [];
   int _total = 0;
   int _page = 1;
@@ -33,11 +36,45 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
     super.dispose();
   }
 
+  String? get _dateFrom {
+    final now = DateTime.now();
+    switch (_dateFilter) {
+      case 'today':
+        return DateFormat('yyyy-MM-dd').format(now);
+      case 'week':
+        return DateFormat('yyyy-MM-dd').format(now.subtract(const Duration(days: 6)));
+      case 'month':
+        return DateFormat('yyyy-MM-dd').format(DateTime(now.year, now.month, 1));
+      case 'year':
+        return DateFormat('yyyy-MM-dd').format(DateTime(now.year, 1, 1));
+      case 'custom':
+        return _customFrom != null ? DateFormat('yyyy-MM-dd').format(_customFrom!) : null;
+      default:
+        return null;
+    }
+  }
+
+  String? get _dateTo {
+    final now = DateTime.now();
+    switch (_dateFilter) {
+      case 'today':
+      case 'week':
+      case 'month':
+      case 'year':
+        return DateFormat('yyyy-MM-dd').format(now);
+      case 'custom':
+        return _customTo != null ? DateFormat('yyyy-MM-dd').format(_customTo!) : null;
+      default:
+        return null;
+    }
+  }
+
   Future<void> _load({bool reset = false}) async {
     if (reset) { setState(() { _loading = true; _page = 1; _users = []; }); }
     try {
       final res = await ApiService.adminGetUsers(
         page: _page, search: _searchCtrl.text.trim(), role: _role,
+        dateFrom: _dateFrom, dateTo: _dateTo,
       );
       if (mounted) {
         setState(() {
@@ -59,98 +96,64 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
     _load();
   }
 
-  Future<void> _toggleBan(Map<String, dynamic> user) async {
-    final nowActive = user['isActive'] as bool? ?? true;
-    final action = nowActive ? 'Ban' : 'Unban';
-    final confirmed = await showDialog<bool>(
+  Future<void> _pickCustomRange() async {
+    final now = DateTime.now();
+    final picked = await showDateRangePicker(
       context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text('$action User', style: const TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('$action "${user['fullName'] ?? user['phone']}"?'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: nowActive ? Colors.red.shade500 : Colors.green.shade600,
-              foregroundColor: Colors.white,
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-            ),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: Text(action),
-          ),
-        ],
+      firstDate: DateTime(2024),
+      lastDate: now,
+      initialDateRange: _customFrom != null && _customTo != null
+          ? DateTimeRange(start: _customFrom!, end: _customTo!)
+          : null,
+      builder: (ctx, child) => Theme(
+        data: Theme.of(ctx).copyWith(
+            colorScheme: const ColorScheme.light(primary: _p)),
+        child: child!,
       ),
     );
-    if (confirmed != true || !mounted) return;
-    try {
-      await ApiService.adminUpdateUser(user['id'] as String, {'isActive': !nowActive});
-      if (mounted) AppSnackbar.success(context, 'User ${nowActive ? 'banned' : 'unbanned'}.');
+    if (picked != null) {
+      setState(() {
+        _dateFilter = 'custom';
+        _customFrom = picked.start;
+        _customTo = picked.end;
+      });
       _load(reset: true);
-    } on ApiException catch (e) {
-      if (mounted) AppSnackbar.error(context, e.message);
-    }
-  }
-
-  Future<void> _deleteUser(Map<String, dynamic> user) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete User', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('Permanently delete "${user['fullName'] ?? user['phone']}"? This cannot be undone.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade500, foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await ApiService.adminDeleteUser(user['id'] as String);
-      if (mounted) AppSnackbar.success(context, 'User deleted.');
-      _load(reset: true);
-    } on ApiException catch (e) {
-      if (mounted) AppSnackbar.error(context, e.message);
     }
   }
 
   void _showDetail(Map<String, dynamic> user) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _UserDetailSheet(
-        user: user,
-        onBan: () { Navigator.pop(context); _toggleBan(user); },
-        onDelete: () { Navigator.pop(context); _deleteUser(user); },
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AdminUserDetailPage(
+          userId:      user['id'] as String,
+          initialName: user['fullName'] as String? ?? user['phone'] as String? ?? '',
+          initialRole: user['role'] as String? ?? 'customer',
+        ),
       ),
-    );
+    ).then((_) => _load(reset: true));
   }
 
   @override
   Widget build(BuildContext context) {
+    const dateOptions = {
+      '': 'All Dates', 'today': 'Today', 'week': 'This Week',
+      'month': 'This Month', 'year': 'This Year',
+    };
+
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
         backgroundColor: _p,
-        title: const Text('Users', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text('Users',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
         bottom: PreferredSize(
-          preferredSize: const Size.fromHeight(110),
+          preferredSize: const Size.fromHeight(148),
           child: Padding(
             padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
             child: Column(children: [
-              // Search
               TextField(
                 controller: _searchCtrl,
                 onSubmitted: (_) => _load(reset: true),
@@ -167,31 +170,89 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
                       : null,
                   filled: true,
                   fillColor: Colors.white.withValues(alpha: 0.15),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   isDense: true,
                 ),
               ),
               const SizedBox(height: 8),
               // Role filter chips
-              Row(children: [
-                for (final r in ['', 'customer', 'professional'])
-                  Padding(
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  for (final r in ['', 'customer', 'professional'])
+                    Padding(
+                      padding: const EdgeInsets.only(right: 8),
+                      child: ChoiceChip(
+                        label: Text(
+                          r.isEmpty ? 'All' : r == 'customer' ? 'Customers' : 'Professionals',
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600,
+                              color: _role == r ? Colors.white : Colors.black87),
+                        ),
+                        selected: _role == r,
+                        onSelected: (_) { setState(() => _role = r); _load(reset: true); },
+                        selectedColor: _p,
+                        backgroundColor: Colors.white,
+                        side: BorderSide(color: _role == r ? _p : Colors.grey.shade300),
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      ),
+                    ),
+                  Text('$_total total',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+              ),
+              const SizedBox(height: 8),
+              // Date filter chips
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  ...dateOptions.entries.map((e) => Padding(
                     padding: const EdgeInsets.only(right: 8),
                     child: ChoiceChip(
-                      label: Text(r.isEmpty ? 'All' : r == 'customer' ? 'Customers' : 'Professionals',
-                          style: TextStyle(fontSize: 12, color: _role == r ? Colors.white : Colors.white70)),
-                      selected: _role == r,
-                      onSelected: (_) { setState(() => _role = r); _load(reset: true); },
-                      selectedColor: Colors.white.withValues(alpha: 0.3),
-                      backgroundColor: Colors.white.withValues(alpha: 0.1),
-                      side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                      label: Text(e.value,
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w600,
+                              color: _dateFilter == e.key ? Colors.white : Colors.black87)),
+                      selected: _dateFilter == e.key,
+                      onSelected: (_) { setState(() => _dateFilter = e.key); _load(reset: true); },
+                      selectedColor: _p,
+                      backgroundColor: Colors.white,
+                      side: BorderSide(
+                          color: _dateFilter == e.key ? _p : Colors.grey.shade300),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    ),
+                  )),
+                  GestureDetector(
+                    onTap: _pickCustomRange,
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: _dateFilter == 'custom' ? _p : Colors.white,
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: _dateFilter == 'custom' ? _p : Colors.grey.shade300),
+                      ),
+                      child: Row(mainAxisSize: MainAxisSize.min, children: [
+                        Icon(Icons.date_range, size: 11,
+                            color: _dateFilter == 'custom' ? Colors.white : Colors.black87),
+                        const SizedBox(width: 4),
+                        Text(
+                          _dateFilter == 'custom' && _customFrom != null
+                              ? '${DateFormat('d MMM').format(_customFrom!)} – ${DateFormat('d MMM').format(_customTo ?? _customFrom!)}'
+                              : 'Custom',
+                          style: TextStyle(
+                              fontSize: 11, fontWeight: FontWeight.w600,
+                              color: _dateFilter == 'custom' ? Colors.white : Colors.black87),
+                        ),
+                      ]),
                     ),
                   ),
-                const Spacer(),
-                Text('$_total total', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-              ]),
+                ]),
+              ),
             ]),
           ),
         ),
@@ -232,41 +293,43 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
   }
 
   Widget _userCard(Map<String, dynamic> user) {
-    final name    = user['fullName'] as String? ?? '';
-    final phone   = user['phone']   as String? ?? '';
-    final role    = user['role']    as String? ?? 'customer';
-    final active  = user['isActive'] as bool? ?? true;
-    final initial = name.isNotEmpty ? name[0].toUpperCase() : phone.isNotEmpty ? phone[0] : '?';
-    final roleColor = role == 'professional' ? Colors.teal.shade600 : Colors.blue.shade600;
+    final name         = user['fullName'] as String? ?? '';
+    final phone        = user['phone']    as String? ?? '';
+    final role         = user['role']     as String? ?? 'customer';
+    final isBanned     = user['isBanned'] as bool?   ?? !(user['isActive'] as bool? ?? true);
+    final initial      = name.isNotEmpty ? name[0].toUpperCase() : phone.isNotEmpty ? phone[0] : '?';
+    final roleColor    = role == 'professional' ? Colors.teal.shade600 : Colors.blue.shade600;
+    final bookingCount = int.tryParse(user['bookingCount']?.toString() ?? '0') ?? 0;
 
     return GestureDetector(
       onTap: () => _showDetail(user),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: active ? Colors.white : Colors.grey.shade50,
+          color: isBanned ? Colors.grey.shade50 : Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: active ? Colors.transparent : Colors.red.shade100),
+          border: Border.all(color: isBanned ? Colors.red.shade100 : Colors.transparent),
           boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)],
         ),
         child: Row(children: [
           CircleAvatar(
             radius: 22,
             backgroundColor: roleColor.withValues(alpha: 0.12),
-            child: Text(initial, style: TextStyle(fontWeight: FontWeight.bold, color: roleColor, fontSize: 16)),
+            child: Text(initial,
+                style: TextStyle(fontWeight: FontWeight.bold, color: roleColor, fontSize: 16)),
           ),
           const SizedBox(width: 12),
           Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
             Row(children: [
               Flexible(child: Text(name.isNotEmpty ? name : phone,
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14,
-                      color: active ? Colors.black87 : Colors.grey.shade500))),
+                      color: isBanned ? Colors.grey.shade500 : Colors.black87))),
               const SizedBox(width: 6),
               _roleBadge(role, roleColor),
-              if (!active) ...[const SizedBox(width: 6), _badge('Banned', Colors.red.shade400)],
+              if (isBanned) ...[const SizedBox(width: 6), _badge('Banned', Colors.red.shade400)],
             ]),
             Text(phone, style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-            Text('${user['bookingCount'] ?? 0} bookings  ·  Joined ${_fmtDate(user['createdAt'])}',
+            Text('$bookingCount bookings  ·  Joined ${_fmtDate(user['createdAt'])}',
                 style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
           ])),
           const Icon(Icons.chevron_right, color: Colors.grey, size: 20),
@@ -277,165 +340,23 @@ class _AdminUsersTabState extends State<AdminUsersTab> {
 
   Widget _roleBadge(String role, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-    child: Text(role, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+    decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+    child: Text(role,
+        style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
   );
 
   Widget _badge(String label, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-    child: Text(label, style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
+    decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
+    child: Text(label,
+        style: TextStyle(fontSize: 10, color: color, fontWeight: FontWeight.bold)),
   );
 
   String _fmtDate(dynamic v) {
     if (v == null) return '';
     final dt = DateTime.tryParse(v.toString());
     return dt != null ? DateFormat('d MMM yy').format(dt) : '';
-  }
-}
-
-// ── User detail bottom sheet ─────────────────────────────────────────────────
-
-class _UserDetailSheet extends StatelessWidget {
-  final Map<String, dynamic> user;
-  final VoidCallback onBan;
-  final VoidCallback onDelete;
-
-  const _UserDetailSheet({required this.user, required this.onBan, required this.onDelete});
-
-  @override
-  Widget build(BuildContext context) {
-    final name    = user['fullName'] as String? ?? '';
-    final phone   = user['phone']   as String? ?? '';
-    final email   = user['email']   as String? ?? '—';
-    final role    = user['role']    as String? ?? '';
-    final active  = user['isActive'] as bool? ?? true;
-    final bookings = user['recentBookings'] as List<dynamic>? ?? [];
-
-    return DraggableScrollableSheet(
-      expand: false,
-      initialChildSize: 0.65,
-      maxChildSize: 0.92,
-      builder: (_, ctrl) => Container(
-        decoration: const BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-        ),
-        child: Column(children: [
-          const SizedBox(height: 8),
-          Container(width: 40, height: 4,
-              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4))),
-          const SizedBox(height: 12),
-          Expanded(
-            child: ListView(controller: ctrl, padding: const EdgeInsets.symmetric(horizontal: 20), children: [
-              // Header
-              Row(children: [
-                CircleAvatar(radius: 28, backgroundColor: Colors.blue.shade50,
-                    child: Text(name.isNotEmpty ? name[0].toUpperCase() : '?',
-                        style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.blue.shade700))),
-                const SizedBox(width: 14),
-                Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text(name.isNotEmpty ? name : phone,
-                      style: const TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
-                  Text(role.toUpperCase(), style: TextStyle(fontSize: 11, color: Colors.blue.shade600, fontWeight: FontWeight.bold)),
-                  if (!active)
-                    Text('BANNED', style: TextStyle(fontSize: 11, color: Colors.red.shade600, fontWeight: FontWeight.bold)),
-                ])),
-              ]),
-              const SizedBox(height: 20),
-
-              // Details grid
-              _row(Icons.phone, 'Phone', phone),
-              _row(Icons.email_outlined, 'Email', email),
-              _row(Icons.person_outline, 'Gender', user['gender'] as String? ?? '—'),
-              _row(Icons.cake_outlined, 'Age', '${user['age'] ?? '—'}'),
-              _row(Icons.calendar_today_outlined, 'Joined',
-                  _fmtDate(user['createdAt'])),
-              _row(Icons.shopping_bag_outlined, 'Total Bookings',
-                  '${(user['recentBookings'] as List?)?.length ?? 0}'),
-
-              if (bookings.isNotEmpty) ...[
-                const SizedBox(height: 16),
-                const Text('Recent Bookings',
-                    style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                const SizedBox(height: 8),
-                ...bookings.take(5).map((b) => _bookingRow(b as Map<String, dynamic>)),
-              ],
-
-              const SizedBox(height: 24),
-              // Actions
-              Row(children: [
-                Expanded(
-                  child: OutlinedButton.icon(
-                    onPressed: onBan,
-                    icon: Icon(active ? Icons.block : Icons.check_circle_outline, size: 16),
-                    label: Text(active ? 'Ban User' : 'Unban User'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: active ? Colors.red : Colors.green.shade700,
-                      side: BorderSide(color: active ? Colors.red : Colors.green.shade700),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: ElevatedButton.icon(
-                    onPressed: onDelete,
-                    icon: const Icon(Icons.delete_outline, size: 16),
-                    label: const Text('Delete'),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.red.shade500, foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                ),
-              ]),
-              const SizedBox(height: 20),
-            ]),
-          ),
-        ]),
-      ),
-    );
-  }
-
-  Widget _row(IconData icon, String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(children: [
-      Icon(icon, size: 16, color: Colors.grey.shade400),
-      const SizedBox(width: 10),
-      Text('$label: ', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-      Expanded(child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-    ]),
-  );
-
-  Widget _bookingRow(Map<String, dynamic> b) => Padding(
-    padding: const EdgeInsets.only(bottom: 6),
-    child: Row(children: [
-      Expanded(child: Text(b['salonName'] as String? ?? '',
-          style: const TextStyle(fontSize: 12), overflow: TextOverflow.ellipsis)),
-      const SizedBox(width: 8),
-      Text(_fmtDate(b['scheduledAt']), style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-      const SizedBox(width: 6),
-      _statusChip(b['status'] as String? ?? ''),
-    ]),
-  );
-
-  Widget _statusChip(String status) {
-    final colors = {
-      'completed': Colors.green, 'confirmed': Colors.blue,
-      'cancelled': Colors.grey, 'rejected': Colors.red, 'pending': Colors.orange,
-    };
-    final c = colors[status] ?? Colors.grey;
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-      decoration: BoxDecoration(color: c.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(6)),
-      child: Text(status, style: TextStyle(fontSize: 10, color: c, fontWeight: FontWeight.bold)),
-    );
-  }
-
-  String _fmtDate(dynamic v) {
-    if (v == null) return '—';
-    final dt = DateTime.tryParse(v.toString());
-    return dt != null ? DateFormat('d MMM yy').format(dt) : '—';
   }
 }

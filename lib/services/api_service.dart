@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../barber_setup/models/salon_onboarding_model.dart';
-import '../main.dart' show RoleSelectionScreen;
+import '../role_selection_screen.dart';
 import '../models/user_profile_model.dart';
 import 'location_prefs.dart';
 
@@ -22,7 +22,7 @@ class ApiException implements Exception {
 class ApiService {
   static const String baseUrl = String.fromEnvironment(
     'API_BASE_URL',
-    defaultValue: "http://192.168.0.220:3000",
+    defaultValue: "http://192.168.1.10:3000",
   );
   static const Duration requestTimeout = Duration(seconds: 15);
 
@@ -971,6 +971,79 @@ class ApiService {
     }
   }
 
+  static Future<int> getProfessionalMonthlyBookingCount() async {
+    final token = await getToken();
+    if (token == null) return 0;
+    try {
+      final response = await http.get(
+        Uri.parse('$baseUrl/bookings/professional/monthly-count'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(requestTimeout);
+      if (response.statusCode != 200) return 0;
+      final body = jsonDecode(response.body) as Map<String, dynamic>;
+      return (body['count'] as num?)?.toInt() ?? 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  // ================= DISCOVERY =================
+
+  static Future<Map<String, dynamic>?> getLastCompletedBooking() async {
+    final token = await getToken();
+    if (token == null) return null;
+    try {
+      final res = await http.get(
+        Uri.parse('$baseUrl/bookings/last-completed'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(requestTimeout);
+      if (res.statusCode != 200) return null;
+      final body = jsonDecode(res.body);
+      if (body == null) return null;
+      return body as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>> getTrendingSalons({
+    double? lat,
+    double? lng,
+    String? city,
+    double radiusKm = 10,
+  }) async {
+    try {
+      String query;
+      if (lat != null && lng != null) {
+        query = 'lat=$lat&lng=$lng&radius=$radiusKm';
+      } else if (city != null && city.isNotEmpty) {
+        query = 'city=${Uri.encodeComponent(city)}';
+      } else {
+        query = '';
+      }
+      final url = '$baseUrl/salons/trending${query.isNotEmpty ? '?$query' : ''}';
+      final res = await http.get(Uri.parse(url)).timeout(requestTimeout);
+      if (res.statusCode != 200) return {'topSalons': [], 'popularServices': []};
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return {'topSalons': [], 'popularServices': []};
+    }
+  }
+
+  static Future<Map<String, dynamic>> getSalonQueue(String salonId) async {
+    try {
+      final res = await http.get(
+        Uri.parse('$baseUrl/salons/$salonId/queue'),
+      ).timeout(requestTimeout);
+      if (res.statusCode != 200) {
+        return {'queueSize': 0, 'estimatedWaitMins': 0, 'isAvailable': true, 'barberCount': 1};
+      }
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return {'queueSize': 0, 'estimatedWaitMins': 0, 'isAvailable': true, 'barberCount': 1};
+    }
+  }
+
   // ================= SALON PHOTO UPLOAD =================
 
   /// Uploads an image file as the salon's cover photo.
@@ -1145,6 +1218,185 @@ class ApiService {
     }
   }
 
+  // ================= BARBER PROFILES =================
+
+  static Future<Map<String, dynamic>?> getBarberProfile(String barberId) async {
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/barbers/$barberId'))
+          .timeout(requestTimeout);
+      if (res.statusCode != 200) return null;
+      return jsonDecode(res.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static Future<Map<String, dynamic>> followBarber(String barberId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/barbers/$barberId/follow'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to follow barber');
+  }
+
+  static Future<Map<String, dynamic>> unfollowBarber(String barberId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/barbers/$barberId/follow'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to unfollow barber');
+  }
+
+  static Future<List<dynamic>> getFollowedBarbers() async {
+    final token = await getToken();
+    if (token == null) return [];
+    try {
+      final res = await http.get(
+        Uri.parse('$baseUrl/barbers/following'),
+        headers: {'Authorization': 'Bearer $token'},
+      ).timeout(requestTimeout);
+      if (res.statusCode != 200) return [];
+      return jsonDecode(res.body) as List<dynamic>;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<Map<String, dynamic>> updateBarberProfile(
+    String barberId, {
+    String? specialization,
+    String? bio,
+    String? openingTime,
+    String? closingTime,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/salons/my/barbers/$barberId/profile'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        if (specialization != null) 'specialization': specialization,
+        if (bio != null) 'bio': bio,
+        if (openingTime != null) 'openingTime': openingTime,
+        if (closingTime != null) 'closingTime': closingTime,
+      }),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to update barber profile');
+  }
+
+  static Future<Map<String, dynamic>> setBarberAvailability(
+    String barberId, {
+    required bool isAvailable,
+    String? leaveUntil,
+    String? breakUntil,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/salons/my/barbers/$barberId/availability'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'isAvailable': isAvailable,
+        if (leaveUntil != null) 'leaveUntil': leaveUntil,
+        if (breakUntil != null) 'breakUntil': breakUntil,
+      }),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to update availability');
+  }
+
+  static Future<Map<String, dynamic>> uploadBarberPhoto(
+      String barberId, String filePath) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/salons/my/barbers/$barberId/photo'),
+    )
+      ..headers['Authorization'] = 'Bearer $token'
+      ..files.add(await http.MultipartFile.fromPath('photo', filePath));
+    final streamed = await request.send().timeout(requestTimeout);
+    final res = await http.Response.fromStream(streamed);
+    return _decodeResponse(res, 'Failed to upload barber photo');
+  }
+
+  static Future<Map<String, dynamic>> addToBarberGallery(
+      String barberId, String filePath, {String? caption}) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/salons/my/barbers/$barberId/gallery'),
+    )
+      ..headers['Authorization'] = 'Bearer $token'
+      ..files.add(await http.MultipartFile.fromPath('photo', filePath));
+    if (caption != null) request.fields['caption'] = caption;
+    final streamed = await request.send().timeout(requestTimeout);
+    final res = await http.Response.fromStream(streamed);
+    return _decodeResponse(res, 'Failed to upload gallery photo');
+  }
+
+  static Future<Map<String, dynamic>> removeFromBarberGallery(
+      String barberId, int index) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/salons/my/barbers/$barberId/gallery/$index'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to remove gallery photo');
+  }
+
+  // ================= SALON PORTFOLIO =================
+
+  static Future<List<dynamic>> getSalonPortfolio(String salonId) async {
+    try {
+      final res = await http
+          .get(Uri.parse('$baseUrl/salons/$salonId/portfolio'))
+          .timeout(requestTimeout);
+      if (res.statusCode != 200) return [];
+      return jsonDecode(res.body) as List<dynamic>;
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<Map<String, dynamic>> uploadPortfolioPhoto(
+    String filePath, {
+    String type = 'portfolio',
+    String? caption,
+    String? beforeUrl,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final request = http.MultipartRequest(
+      'POST',
+      Uri.parse('$baseUrl/salons/my/portfolio'),
+    )
+      ..headers['Authorization'] = 'Bearer $token'
+      ..fields['type'] = type
+      ..files.add(await http.MultipartFile.fromPath('photo', filePath));
+    if (caption != null) request.fields['caption'] = caption;
+    if (beforeUrl != null) request.fields['beforeUrl'] = beforeUrl;
+    final streamed = await request.send().timeout(requestTimeout);
+    final res = await http.Response.fromStream(streamed);
+    return _decodeResponse(res, 'Failed to upload portfolio photo');
+  }
+
+  static Future<Map<String, dynamic>> deletePortfolioPhoto(String photoId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/salons/my/portfolio/$photoId'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to delete portfolio photo');
+  }
+
   // ── Admin ─────────────────────────────────────────────────────────────────
 
   static Future<Map<String, dynamic>> adminLogin(String phone, String password) async {
@@ -1180,6 +1432,7 @@ class ApiService {
   // Users
   static Future<Map<String, dynamic>> adminGetUsers({
     int page = 1, int limit = 20, String search = '', String role = '',
+    String? dateFrom, String? dateTo,
   }) async {
     final token = await getToken();
     if (token == null) throw ApiException(401, 'Not authenticated');
@@ -1187,6 +1440,8 @@ class ApiService {
       'page': '$page', 'limit': '$limit',
       if (search.isNotEmpty) 'search': search,
       if (role.isNotEmpty) 'role': role,
+      if (dateFrom != null) 'dateFrom': dateFrom,
+      if (dateTo != null) 'dateTo': dateTo,
     });
     final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
     return _decodeResponse(res, 'Failed to load users');
@@ -1200,6 +1455,26 @@ class ApiService {
       headers: {'Authorization': 'Bearer $token'},
     ).timeout(requestTimeout);
     return _decodeResponse(res, 'Failed to load user');
+  }
+
+  static Future<Map<String, dynamic>> adminGetUserBookings(
+    String id, {
+    int page = 1,
+    int limit = 20,
+    String status = '',
+    String? dateFrom,
+    String? dateTo,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final uri = Uri.parse('$baseUrl/admin/users/$id/bookings').replace(queryParameters: {
+      'page': '$page', 'limit': '$limit',
+      if (status.isNotEmpty) 'status': status,
+      if (dateFrom != null) 'dateFrom': dateFrom,
+      if (dateTo != null) 'dateTo': dateTo,
+    });
+    final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to load user bookings');
   }
 
   static Future<void> adminUpdateUser(String id, Map<String, dynamic> body) async {
@@ -1223,6 +1498,34 @@ class ApiService {
     _decodeResponse(res, 'Failed to delete user');
   }
 
+  static Future<Map<String, dynamic>> adminSetSubscription(
+    String userId,
+    String plan, {
+    int? durationDays,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/users/$userId/subscription'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'plan': plan,
+        if (durationDays != null) 'durationDays': durationDays,
+      }),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to update subscription');
+  }
+
+  static Future<Map<String, dynamic>> adminCancelSubscription(String userId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/admin/users/$userId/subscription'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to cancel subscription');
+  }
+
   // Salons
   static Future<Map<String, dynamic>> adminGetSalons({
     int page = 1, int limit = 20, String search = '', String status = '',
@@ -1236,6 +1539,26 @@ class ApiService {
     });
     final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
     return _decodeResponse(res, 'Failed to load salons');
+  }
+
+  static Future<Map<String, dynamic>> adminGetSalonBookings(
+    String id, {
+    int page = 1,
+    int limit = 20,
+    String status = '',
+    String? dateFrom,
+    String? dateTo,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final uri = Uri.parse('$baseUrl/admin/salons/$id/bookings').replace(queryParameters: {
+      'page': '$page', 'limit': '$limit',
+      if (status.isNotEmpty) 'status': status,
+      if (dateFrom != null) 'dateFrom': dateFrom,
+      if (dateTo != null) 'dateTo': dateTo,
+    });
+    final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to load salon bookings');
   }
 
   static Future<Map<String, dynamic>> adminGetSalon(String id) async {
@@ -1300,9 +1623,97 @@ class ApiService {
     _decodeResponse(res, 'Failed to delete salon');
   }
 
+  static Future<Map<String, dynamic>> adminBanUser(
+    String id, {
+    double? durationHours,
+    required String reason,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/users/$id/ban'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'durationHours': durationHours, 'reason': reason}),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to ban user');
+  }
+
+  static Future<Map<String, dynamic>> adminUnbanUser(String id) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/users/$id/unban'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to unban user');
+  }
+
+  static Future<Map<String, dynamic>> adminBanSalon(
+    String id, {
+    double? durationHours,
+    required String reason,
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/salons/$id/ban'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'durationHours': durationHours, 'reason': reason}),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to ban salon');
+  }
+
+  static Future<Map<String, dynamic>> adminUnbanSalon(String id) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/salons/$id/unban'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to unban salon');
+  }
+
+  static Future<Map<String, dynamic>> adminGetComplaints({
+    int page = 1, int limit = 20, String type = '', String status = '',
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final uri = Uri.parse('$baseUrl/admin/complaints').replace(queryParameters: {
+      'page': '$page', 'limit': '$limit',
+      if (type.isNotEmpty) 'type': type,
+      if (status.isNotEmpty) 'status': status,
+    });
+    final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to load complaints');
+  }
+
+  static Future<void> submitComplaint({
+    required String type,
+    required String targetId,
+    required String reason,
+    String description = '',
+    String severity = 'minor',
+  }) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/users/complaints'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({
+        'type': type,
+        'targetId': targetId,
+        'reason': reason,
+        'description': description,
+        'severity': severity,
+      }),
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to submit complaint');
+  }
+
   // Bookings
   static Future<Map<String, dynamic>> adminGetBookings({
     int page = 1, int limit = 20, String search = '', String status = '',
+    String? dateFrom, String? dateTo,
   }) async {
     final token = await getToken();
     if (token == null) throw ApiException(401, 'Not authenticated');
@@ -1310,9 +1721,106 @@ class ApiService {
       'page': '$page', 'limit': '$limit',
       if (search.isNotEmpty) 'search': search,
       if (status.isNotEmpty) 'status': status,
+      if (dateFrom != null) 'dateFrom': dateFrom,
+      if (dateTo != null) 'dateTo': dateTo,
     });
     final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
     return _decodeResponse(res, 'Failed to load bookings');
+  }
+
+  static Future<Map<String, dynamic>> adminCreateOffer(Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/offers'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to create offer');
+  }
+
+  static Future<Map<String, dynamic>> adminUpdateOffer(String id, Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/admin/offers/$id'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to update offer');
+  }
+
+  static Future<Map<String, dynamic>> adminAssignCoupon(String couponId, List<String> userIds) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/coupons/$couponId/assign'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'userIds': userIds}),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to assign coupon');
+  }
+
+  static Future<List<dynamic>> adminGetCouponAssignees(String couponId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.get(
+      Uri.parse('$baseUrl/admin/coupons/$couponId/assignees'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeListResponse(res, 'Failed to load assignees');
+  }
+
+  static Future<void> adminRemoveCouponAssignee(String couponId, String userId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/admin/coupons/$couponId/assignees/$userId'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to remove assignee');
+  }
+
+  static Future<Map<String, dynamic>> adminCreateSubAdmin(Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/sub-admins'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to create sub-admin');
+  }
+
+  static Future<List<dynamic>> adminListSubAdmins() async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.get(
+      Uri.parse('$baseUrl/admin/sub-admins'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeListResponse(res, 'Failed to load sub-admins');
+  }
+
+  static Future<void> adminUpdateSubAdminPermissions(String id, Map<String, dynamic> permissions) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/admin/sub-admins/$id/permissions'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode({'permissions': permissions}),
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to update permissions');
+  }
+
+  static Future<void> adminDeleteSubAdmin(String id) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/admin/sub-admins/$id'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to delete sub-admin');
   }
 
   // Offers (admin)
@@ -1334,11 +1842,234 @@ class ApiService {
     _decodeResponse(res, 'Failed to delete offer');
   }
 
+  // Coupons (admin)
+  static Future<Map<String, dynamic>> adminGetCoupons({int page = 1, int limit = 50}) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final uri = Uri.parse('$baseUrl/admin/coupons').replace(queryParameters: {'page': '$page', 'limit': '$limit'});
+    final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to load coupons');
+  }
+
+  static Future<Map<String, dynamic>> adminCreateCoupon(Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/admin/coupons'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to create coupon');
+  }
+
+  static Future<void> adminToggleCoupon(String id) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/admin/coupons/$id/toggle'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to toggle coupon');
+  }
+
+  static Future<void> adminDeleteCoupon(String id) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/admin/coupons/$id'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to delete coupon');
+  }
+
   static List<dynamic> _decodeListResponse(http.Response res, String fallback) {
     if (res.statusCode == 200 || res.statusCode == 201) {
       return jsonDecode(res.body) as List<dynamic>;
     }
     final body = jsonDecode(res.body) as Map<String, dynamic>;
     throw ApiException(res.statusCode, (body['message'] as String?) ?? fallback);
+  }
+
+  // ================= WALK-IN QUEUE =================
+
+  static Future<List<dynamic>> getWalkIns({String? date}) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final uri = Uri.parse('$baseUrl/salons/my/walk-ins${date != null ? '?date=$date' : ''}');
+    final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
+    return _decodeListResponse(res, 'Failed to load walk-ins');
+  }
+
+  /// Professional: look up a customer by phone for offline booking auto-fill.
+  /// Returns `{ name, phone }` on success, null when no account exists.
+  /// Throws [ApiException] (403) when the phone belongs to a professional or
+  /// to the requesting salon itself — the caller should surface the message.
+  static Future<Map<String, dynamic>?> lookupUserByPhone(String phone) async {
+    final token = await getToken();
+    if (token == null) return null;
+    final res = await http.get(
+      Uri.parse('$baseUrl/users/lookup-by-phone?phone=${Uri.encodeComponent(phone)}'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    if (res.statusCode == 200) return jsonDecode(res.body) as Map<String, dynamic>;
+    if (res.statusCode == 404) return null;
+    // 403 = professional account or own salon phone — surface the message
+    Map<String, dynamic>? body;
+    try { body = jsonDecode(res.body) as Map<String, dynamic>; } catch (_) {}
+    final msg = body?['message'] as String? ?? 'This phone number cannot be used for booking';
+    throw ApiException(res.statusCode, msg, body);
+  }
+
+  static Future<Map<String, dynamic>> addWalkIn(Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/salons/my/walk-ins'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to add walk-in');
+  }
+
+  static Future<Map<String, dynamic>> updateWalkIn(String walkInId, Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/salons/my/walk-ins/$walkInId'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to update walk-in');
+  }
+
+  static Future<void> deleteWalkIn(String walkInId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/salons/my/walk-ins/$walkInId'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to delete walk-in');
+  }
+
+  // ================= SCHEDULE GAPS =================
+
+  static Future<Map<String, dynamic>> getScheduleGaps({String? date}) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final uri = Uri.parse('$baseUrl/salons/my/schedule/gaps${date != null ? '?date=$date' : ''}');
+    final res = await http.get(uri, headers: {'Authorization': 'Bearer $token'}).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to load schedule gaps');
+  }
+
+  // ================= INVENTORY =================
+
+  static Future<List<dynamic>> getInventory() async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.get(
+      Uri.parse('$baseUrl/salons/my/inventory'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeListResponse(res, 'Failed to load inventory');
+  }
+
+  static Future<Map<String, dynamic>> addInventoryItem(Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/salons/my/inventory'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to add inventory item');
+  }
+
+  static Future<Map<String, dynamic>> updateInventoryItem(String itemId, Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/salons/my/inventory/$itemId'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to update inventory item');
+  }
+
+  static Future<void> deleteInventoryItem(String itemId) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.delete(
+      Uri.parse('$baseUrl/salons/my/inventory/$itemId'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    _decodeResponse(res, 'Failed to delete inventory item');
+  }
+
+  // ================= ATTENDANCE =================
+
+  static Future<List<dynamic>> getAttendance({int? month, int? year}) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final now = DateTime.now();
+    final m = month ?? now.month;
+    final y = year ?? now.year;
+    final res = await http.get(
+      Uri.parse('$baseUrl/salons/my/attendance?month=$m&year=$y'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeListResponse(res, 'Failed to load attendance');
+  }
+
+  static Future<Map<String, dynamic>> markAttendance(Map<String, dynamic> body) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.post(
+      Uri.parse('$baseUrl/salons/my/attendance'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to mark attendance');
+  }
+
+  // ================= PAYROLL =================
+
+  static Future<List<dynamic>> getPayrollSummary({int? month, int? year}) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final now = DateTime.now();
+    final m = month ?? now.month;
+    final y = year ?? now.year;
+    final res = await http.get(
+      Uri.parse('$baseUrl/salons/my/payroll?month=$m&year=$y'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeListResponse(res, 'Failed to load payroll');
+  }
+
+  static Future<Map<String, dynamic>> updateBarberPayroll(
+    String barberId,
+    Map<String, dynamic> body,
+  ) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.patch(
+      Uri.parse('$baseUrl/salons/my/barbers/$barberId/payroll'),
+      headers: {'Authorization': 'Bearer $token', 'Content-Type': 'application/json'},
+      body: jsonEncode(body),
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to update payroll settings');
+  }
+
+  // ================= ANALYTICS =================
+
+  static Future<Map<String, dynamic>> getSalonAnalytics({String period = '30d'}) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.get(
+      Uri.parse('$baseUrl/salons/my/analytics?period=$period'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to load analytics');
   }
 }

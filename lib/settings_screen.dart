@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'package:no_wait_app/main.dart';
+import 'package:no_wait_app/role_selection_screen.dart';
 import 'package:no_wait_app/services/api_service.dart';
 import 'package:no_wait_app/widgets/app_snackbar.dart';
 import 'package:no_wait_app/widgets/loading_widget.dart';

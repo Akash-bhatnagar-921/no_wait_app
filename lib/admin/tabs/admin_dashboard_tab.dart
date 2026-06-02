@@ -1,7 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
 import 'package:no_wait_app/services/api_service.dart';
-import 'package:no_wait_app/widgets/app_snackbar.dart';
 
 const Color _p = Color(0xFF1565C0);
 
@@ -17,6 +16,7 @@ class _AdminDashboardTabState extends State<AdminDashboardTab> {
   bool _loading = true;
   Map<String, dynamic> _stats = {};
   List<dynamic> _pendingSalons = [];
+  String _revenuePeriod = 'month';
 
   @override
   void initState() {
@@ -37,26 +37,6 @@ class _AdminDashboardTabState extends State<AdminDashboardTab> {
       }
     } catch (_) {
       if (mounted) setState(() => _loading = false);
-    }
-  }
-
-  Future<void> _approve(String id) async {
-    try {
-      await ApiService.adminApproveSalon(id);
-      if (mounted) AppSnackbar.success(context, 'Salon approved.');
-      _load();
-    } on ApiException catch (e) {
-      if (mounted) AppSnackbar.error(context, e.message);
-    }
-  }
-
-  Future<void> _reject(String id) async {
-    try {
-      await ApiService.adminRejectSalon(id);
-      if (mounted) AppSnackbar.success(context, 'Salon rejected.');
-      _load();
-    } on ApiException catch (e) {
-      if (mounted) AppSnackbar.error(context, e.message);
     }
   }
 
@@ -113,6 +93,8 @@ class _AdminDashboardTabState extends State<AdminDashboardTab> {
                     _statCard('Pending',       '${_stats['pendingSalons'] ?? 0}',    Icons.hourglass_top_outlined,  Colors.orange.shade600),
                     _statCard("Today's Bkgs",  '${_stats['todayBookings'] ?? 0}',   Icons.calendar_today_outlined,  Colors.purple.shade600),
                     _statCard('Month Revenue', '₹${_fmt(_stats['monthRevenue'])}',   Icons.currency_rupee,           Colors.indigo.shade600),
+                    _statCard('Active Subs',   '${_stats['activeSubscriptions'] ?? 0}', Icons.subscriptions_outlined, Colors.deepPurple.shade600),
+                    _statCard('Sub Revenue',   '₹${_fmt(_stats['subscriptionRevenue'])}', Icons.monetization_on_outlined, Colors.amber.shade800),
                   ],
                 ),
               ),
@@ -127,20 +109,59 @@ class _AdminDashboardTabState extends State<AdminDashboardTab> {
                       gradient: LinearGradient(colors: [_p, Colors.blue.shade400]),
                       borderRadius: BorderRadius.circular(16),
                     ),
-                    child: Row(children: [
-                      const Icon(Icons.account_balance_wallet_outlined, color: Colors.white, size: 32),
-                      const SizedBox(width: 14),
-                      Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                        const Text('Total Platform Revenue',
+                    child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                      Row(children: [
+                        const Icon(Icons.account_balance_wallet_outlined,
+                            color: Colors.white, size: 22),
+                        const SizedBox(width: 8),
+                        const Text('Platform Revenue (Subscriptions)',
                             style: TextStyle(color: Colors.white70, fontSize: 12)),
-                        Text('₹${_fmt(_stats['totalRevenue'])}',
-                            style: const TextStyle(color: Colors.white, fontSize: 24, fontWeight: FontWeight.bold)),
+                        const Spacer(),
+                        Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
+                          Text('${_stats['completedBookings'] ?? 0}',
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 16,
+                                  fontWeight: FontWeight.bold)),
+                          const Text('completed',
+                              style: TextStyle(color: Colors.white70, fontSize: 10)),
+                        ]),
                       ]),
-                      const Spacer(),
-                      Column(crossAxisAlignment: CrossAxisAlignment.end, children: [
-                        Text('${_stats['completedBookings'] ?? 0}',
-                            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
-                        const Text('completed', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                      const SizedBox(height: 8),
+                      Text(
+                        '₹${_fmt(_stats[_revenuePeriod == 'week' ? 'weekSubRevenue' : _revenuePeriod == 'year' ? 'yearSubRevenue' : _revenuePeriod == 'all' ? 'subscriptionRevenue' : 'monthSubRevenue'])}',
+                        style: const TextStyle(
+                            color: Colors.white, fontSize: 28,
+                            fontWeight: FontWeight.bold),
+                      ),
+                      const SizedBox(height: 10),
+                      Row(children: [
+                        for (final entry in {
+                          'week': 'This Week',
+                          'month': 'This Month',
+                          'year': 'This Year',
+                          'all': 'All Time',
+                        }.entries)
+                          GestureDetector(
+                            onTap: () => setState(() => _revenuePeriod = entry.key),
+                            child: Container(
+                              margin: const EdgeInsets.only(right: 8),
+                              padding: const EdgeInsets.symmetric(
+                                  horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: _revenuePeriod == entry.key
+                                    ? Colors.white.withValues(alpha: 0.25)
+                                    : Colors.transparent,
+                                borderRadius: BorderRadius.circular(20),
+                                border: Border.all(
+                                    color: Colors.white.withValues(alpha: 0.4)),
+                              ),
+                              child: Text(entry.value,
+                                  style: const TextStyle(
+                                      color: Colors.white,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w600)),
+                            ),
+                          ),
                       ]),
                     ]),
                   ),
@@ -222,34 +243,6 @@ class _AdminDashboardTabState extends State<AdminDashboardTab> {
             style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
         Text('Manager: ${salon['managerName'] ?? 'Unknown'}  ·  ${salon['managerPhone'] ?? ''}',
             style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
-        const SizedBox(height: 10),
-        Row(children: [
-          Expanded(
-            child: OutlinedButton(
-              onPressed: () => _reject(salon['id'] as String),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.red,
-                side: const BorderSide(color: Colors.red),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-              ),
-              child: const Text('Reject', style: TextStyle(fontSize: 13)),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: ElevatedButton(
-              onPressed: () => _approve(salon['id'] as String),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.green.shade600,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                padding: const EdgeInsets.symmetric(vertical: 8),
-              ),
-              child: const Text('Approve', style: TextStyle(fontSize: 13)),
-            ),
-          ),
-        ]),
       ]),
     );
   }

@@ -4,6 +4,7 @@ import 'package:intl/intl.dart';
 import 'find_salons_screen.dart';
 import 'map_screen.dart';
 import 'my_bookings_screen.dart';
+import 'salon_detail_screen.dart';
 import 'subscriptions_screen.dart';
 import 'services/api_service.dart';
 import 'services/location_prefs.dart';
@@ -25,6 +26,8 @@ class _HomeScreenState extends State<HomeScreen> {
   String _subscriptionPlan = '';
   bool _loading = true;
   bool _hasError = false;
+  List<dynamic> _trendingSalons = [];
+  List<dynamic> _popularServices = [];
 
   @override
   void initState() {
@@ -56,6 +59,12 @@ class _HomeScreenState extends State<HomeScreen> {
           ? savedDate
           : null;
 
+      // Fetch trending in parallel — failure is non-fatal
+      final trendingData = await ApiService.getTrendingSalons(
+        lat: loc?.lat,
+        lng: loc?.lng,
+      ).catchError((_) => <String, dynamic>{'topSalons': [], 'popularServices': []});
+
       if (mounted) {
         setState(() {
           _location            = loc;
@@ -63,6 +72,8 @@ class _HomeScreenState extends State<HomeScreen> {
           _activeBooking       = activeBooking;
           _monthlyBookingCount = monthlyCount;
           _subscriptionPlan    = plan;
+          _trendingSalons      = (trendingData['topSalons'] as List?) ?? [];
+          _popularServices     = (trendingData['popularServices'] as List?) ?? [];
           _loading             = false;
         });
       }
@@ -105,12 +116,12 @@ class _HomeScreenState extends State<HomeScreen> {
     if (_activeBooking != null) {
       AppSnackbar.warning(
         context,
-        'You already have an upcoming booking. Cancel it first to explore new salons.',
+        'Your chair is already reserved! Cancel it first to explore new salons.',
       );
       return;
     }
     if (_location == null) {
-      AppSnackbar.warning(context, 'Please select a location first.');
+      AppSnackbar.warning(context, 'Where should we look? Set your location first.');
       return;
     }
     if (_subscriptionPlan == 'free' && _monthlyBookingCount >= 2) {
@@ -134,10 +145,10 @@ class _HomeScreenState extends State<HomeScreen> {
       context: context,
       builder: (ctx) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        title: const Text('Monthly Limit Reached',
+        title: const Text('You\'re on a roll — upgrade to keep going',
             style: TextStyle(fontWeight: FontWeight.bold)),
         content: const Text(
-          'You\'ve used your 2 free bookings this month.\n\nUpgrade to Basic or Pro for unlimited bookings every month.',
+          'You\'ve used both free bookings this month.\n\nUpgrade to Basic or Pro for unlimited bookings — your barber\'s ready.',
         ),
         actions: [
           TextButton(
@@ -170,10 +181,10 @@ class _HomeScreenState extends State<HomeScreen> {
   // ── Helpers ────────────────────────────────────────────────────────────────
 
   String get _locationLabel =>
-      _location?.name ?? 'Use current location';
+      _location?.name ?? 'Tap to set your neighbourhood';
 
   String get _dateLabel {
-    if (_date == null) return 'Choose your slot';
+    if (_date == null) return 'Pick a date, lock your chair';
     final today = DateTime.now();
     if (_date!.year == today.year && _date!.month == today.month && _date!.day == today.day) {
       return 'Today';
@@ -205,7 +216,7 @@ class _HomeScreenState extends State<HomeScreen> {
       drawer: const AppDrawer(),
       body: SafeArea(
         child: _loading
-            ? const Center(child: CircularProgressIndicator())
+            ? _buildSkeleton()
             : _hasError
                 ? _errorView()
                 : Center(
@@ -217,6 +228,29 @@ class _HomeScreenState extends State<HomeScreen> {
                     ),
                   ),
       ),
+    );
+  }
+
+  Widget _buildSkeleton() {
+    return SingleChildScrollView(
+      padding: const EdgeInsets.all(16),
+      child: Column(children: [
+        ClipRRect(
+          borderRadius: BorderRadius.circular(16),
+          child: _ShimmerBox(width: double.infinity,
+              height: MediaQuery.of(context).size.width * 1.25),
+        ),
+        const SizedBox(height: 20),
+        const _ShimmerBox(width: double.infinity, height: 22),
+        const SizedBox(height: 8),
+        const _ShimmerBox(width: 200, height: 14),
+        const SizedBox(height: 24),
+        const _ShimmerBox(width: double.infinity, height: 66, radius: 14),
+        const SizedBox(height: 14),
+        const _ShimmerBox(width: double.infinity, height: 66, radius: 14),
+        const SizedBox(height: 30),
+        const _ShimmerBox(width: double.infinity, height: 55, radius: 14),
+      ]),
     );
   }
 
@@ -306,7 +340,7 @@ class _HomeScreenState extends State<HomeScreen> {
       children: [
         const Center(
           child: Text(
-            'Find the best salons near you',
+            'Time for a fresh look?',
             textAlign: TextAlign.center,
             style: TextStyle(fontSize: 26, fontWeight: FontWeight.bold),
           ),
@@ -314,7 +348,7 @@ class _HomeScreenState extends State<HomeScreen> {
         const SizedBox(height: 8),
         const Center(
           child: Text(
-            'Choose your location and date to skip waiting.',
+            'Pick your spot, show up fresh. No waiting.',
             textAlign: TextAlign.center,
             style: TextStyle(color: Colors.grey),
           ),
@@ -324,7 +358,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Location card
         _card(
           icon: Icons.location_on,
-          title: 'Location',
+          title: 'Where are you?',
           subtitle: _locationLabel,
           hasValue: _location != null,
           onTap: _openMap,
@@ -333,7 +367,7 @@ class _HomeScreenState extends State<HomeScreen> {
         // Date card
         _card(
           icon: Icons.calendar_today,
-          title: 'Select Date',
+          title: 'When do you want to go?',
           subtitle: _dateLabel,
           hasValue: _date != null,
           onTap: _pickDate,
@@ -397,7 +431,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          'You have an upcoming booking at ${_activeBooking!['salonName']}.',
+                          'Your barber is waiting at ${_activeBooking!['salonName']}.',
                           style: TextStyle(
                               fontSize: 13,
                               fontWeight: FontWeight.w600,
@@ -405,7 +439,7 @@ class _HomeScreenState extends State<HomeScreen> {
                         ),
                         const SizedBox(height: 3),
                         Text(
-                          'Cancel your existing booking before exploring new salons. Tap to view.',
+                          'You\'ve already got a chair reserved. Cancel it to book somewhere new.',
                           style: TextStyle(
                               fontSize: 12, color: Colors.amber.shade800),
                         ),
@@ -441,13 +475,23 @@ class _HomeScreenState extends State<HomeScreen> {
                 if (_activeBooking != null)
                   const Icon(Icons.block, size: 18),
                 if (_activeBooking != null) const SizedBox(width: 8),
-                const Text('Find Salons',
+                const Text('Find Your Next Look',
                     style: TextStyle(
                         fontSize: 16, fontWeight: FontWeight.bold)),
               ],
             ),
           ),
         ),
+
+        // ── Trending Near You ──────────────────────────────────────
+        if (_trendingSalons.isNotEmpty || _popularServices.isNotEmpty) ...[
+          const SizedBox(height: 32),
+          _TrendingSection(
+            salons: _trendingSalons,
+            services: _popularServices,
+            date: _date ?? DateTime.now(),
+          ),
+        ],
       ],
     );
   }
@@ -504,4 +548,253 @@ class _HomeScreenState extends State<HomeScreen> {
       ),
     );
   }
+}
+
+// ── Trending Near You section ─────────────────────────────────────────────────
+
+class _TrendingSection extends StatelessWidget {
+  final List<dynamic> salons;
+  final List<dynamic> services;
+  final DateTime date;
+
+  const _TrendingSection({
+    required this.salons,
+    required this.services,
+    required this.date,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final primary = Theme.of(context).colorScheme.primary;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Row(children: [
+          Icon(Icons.local_fire_department_rounded,
+              color: Colors.deepOrange.shade400, size: 18),
+          const SizedBox(width: 6),
+          const Text('Trending Near You',
+              style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+        ]),
+        const SizedBox(height: 4),
+        Text('Most-booked salons this week',
+            style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+        const SizedBox(height: 14),
+
+        // Popular services chips
+        if (services.isNotEmpty) ...[
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: Row(
+              children: services.map((s) {
+                final svc = s as Map<String, dynamic>;
+                final name = svc['service'] as String? ?? '';
+                return Container(
+                  margin: const EdgeInsets.only(right: 8),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 12, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: primary.withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(20),
+                    border:
+                        Border.all(color: primary.withValues(alpha: 0.2)),
+                  ),
+                  child: Text(
+                    name,
+                    style: TextStyle(
+                      fontSize: 12,
+                      fontWeight: FontWeight.w500,
+                      color: primary,
+                    ),
+                  ),
+                );
+              }).toList(),
+            ),
+          ),
+          const SizedBox(height: 14),
+        ],
+
+        // Salon cards horizontal scroll
+        SizedBox(
+          height: 140,
+          child: ListView.builder(
+            scrollDirection: Axis.horizontal,
+            itemCount: salons.length,
+            itemBuilder: (_, i) {
+              final s = salons[i] as Map<String, dynamic>;
+              final name   = s['name'] as String? ?? '';
+              final city   = s['city'] as String? ?? '';
+              final rating = (s['rating'] as num?)?.toDouble() ?? 0;
+              final bookings = s['weeklyBookings'] as int? ?? 0;
+
+              return GestureDetector(
+                onTap: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => SalonDetailScreen(
+                      salonId:     s['id'] as String,
+                      salonName:   name,
+                      city:        city,
+                      rating:      rating,
+                      initialDate: date,
+                    ),
+                  ),
+                ),
+                child: Container(
+                  width: 180,
+                  margin: const EdgeInsets.only(right: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white,
+                    borderRadius: BorderRadius.circular(14),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.06),
+                        blurRadius: 8,
+                        offset: const Offset(0, 2),
+                      ),
+                    ],
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: const BorderRadius.vertical(
+                            top: Radius.circular(14)),
+                        child: _SalonCardImage(
+                          imageUrl: s['image'] as String?,
+                          primary: primary,
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.fromLTRB(10, 8, 10, 6),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 3),
+                            Row(children: [
+                              Icon(Icons.star_rounded,
+                                  size: 12,
+                                  color: Colors.amber.shade600),
+                              const SizedBox(width: 2),
+                              Text(rating.toStringAsFixed(1),
+                                  style: TextStyle(
+                                      fontSize: 11,
+                                      color: Colors.grey.shade600)),
+                              const Spacer(),
+                              if (bookings > 0) ...[
+                                Icon(Icons.trending_up,
+                                    size: 11,
+                                    color: Colors.green.shade600),
+                                const SizedBox(width: 2),
+                                Text('$bookings this week',
+                                    style: TextStyle(
+                                        fontSize: 10,
+                                        color: Colors.green.shade600)),
+                              ],
+                            ]),
+                          ],
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Shimmer skeleton box ──────────────────────────────────────────────────────
+
+class _ShimmerBox extends StatefulWidget {
+  final double width;
+  final double height;
+  final double radius;
+  const _ShimmerBox({
+    required this.width,
+    required this.height,
+    this.radius = 8,
+  });
+
+  @override
+  State<_ShimmerBox> createState() => _ShimmerBoxState();
+}
+
+class _ShimmerBoxState extends State<_ShimmerBox>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _ctrl;
+  late final Animation<double> _anim;
+
+  @override
+  void initState() {
+    super.initState();
+    _ctrl = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 1200),
+    )..repeat(reverse: true);
+    _anim = CurvedAnimation(parent: _ctrl, curve: Curves.easeInOut);
+  }
+
+  @override
+  void dispose() {
+    _ctrl.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _anim,
+      builder: (_, child) => Container(
+        width: widget.width,
+        height: widget.height,
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(widget.radius),
+          color: Color.lerp(
+            Colors.grey.shade200,
+            Colors.grey.shade100,
+            _anim.value,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SalonCardImage extends StatelessWidget {
+  final String? imageUrl;
+  final Color primary;
+  const _SalonCardImage({required this.imageUrl, required this.primary});
+
+  @override
+  Widget build(BuildContext context) {
+    if (imageUrl != null && imageUrl!.isNotEmpty) {
+      return Image.network(
+        '${ApiService.baseUrl}$imageUrl',
+        width: double.infinity,
+        height: 72,
+        fit: BoxFit.cover,
+        errorBuilder: (context, e, _) => _placeholder(),
+      );
+    }
+    return _placeholder();
+  }
+
+  Widget _placeholder() => Container(
+        width: double.infinity,
+        height: 72,
+        color: primary.withValues(alpha: 0.08),
+        child: Icon(Icons.content_cut,
+            color: primary.withValues(alpha: 0.4), size: 28),
+      );
 }

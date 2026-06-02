@@ -1,7 +1,9 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:no_wait_app/admin/admin_home_screen.dart';
 import 'package:no_wait_app/services/api_service.dart';
 import 'package:no_wait_app/widgets/app_snackbar.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 const Color _kPrimary = Color(0xFF1565C0);
 
@@ -51,11 +53,21 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
         _passwordCtrl.text,
       );
       await ApiService.saveToken(res['access_token'] as String);
+      // Save permissions — null means super admin (full access)
+      final adminData   = res['admin'] as Map<String, dynamic>?;
+      final permissions = adminData?['permissions'] as Map<String, dynamic>?;
+      final prefs       = await SharedPreferences.getInstance();
+      if (permissions == null) {
+        await prefs.remove('admin_permissions');
+      } else {
+        await prefs.setString('admin_permissions', jsonEncode(permissions));
+      }
       if (!mounted) return;
       Navigator.pushAndRemoveUntil(
         context,
         MaterialPageRoute(builder: (_) => AdminHomeScreen(
-          adminName: (res['admin'] as Map?)?['fullName'] as String? ?? 'Admin',
+          adminName:   adminData?['fullName'] as String? ?? 'Admin',
+          isSuperAdmin: permissions == null,
         )),
         (route) => false,
       );
@@ -70,6 +82,14 @@ class _AdminLoginScreenState extends State<AdminLoginScreen> {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: const Color(0xFFF0F4FF),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFFF0F4FF),
+        elevation: 0,
+        scrolledUnderElevation: 0,
+        leading: Navigator.canPop(context)
+            ? const BackButton(color: Color(0xFF0D1B4B))
+            : null,
+      ),
       body: SafeArea(
         child: Center(
           child: SingleChildScrollView(

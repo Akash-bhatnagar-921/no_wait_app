@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:no_wait_app/admin/pages/admin_salon_detail_page.dart';
 import 'package:no_wait_app/services/api_service.dart';
 import 'package:no_wait_app/widgets/app_snackbar.dart';
 
@@ -79,55 +80,25 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
     }
   }
 
-  Future<void> _delete(Map<String, dynamic> salon) async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Delete Salon', style: TextStyle(fontWeight: FontWeight.bold)),
-        content: Text('Delete "${salon['name']}"? All associated data will be removed.'),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(ctx, false),
-              child: const Text('Cancel', style: TextStyle(color: Colors.grey))),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red.shade500,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
-            onPressed: () => Navigator.pop(ctx, true),
-            child: const Text('Delete'),
-          ),
-        ],
-      ),
-    );
-    if (confirmed != true || !mounted) return;
-    try {
-      await ApiService.adminDeleteSalon(salon['id'] as String);
-      if (mounted) AppSnackbar.success(context, 'Salon deleted.');
-      _load(reset: true);
-    } on ApiException catch (e) {
-      if (mounted) AppSnackbar.error(context, e.message);
-    }
-  }
-
   void _showDetail(Map<String, dynamic> salon) {
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (_) => _SalonDetailSheet(
-        salon: salon,
-        onApprove: salon['status'] == 'pending' ? () { Navigator.pop(context); _approve(salon['id'] as String); } : null,
-        onReject:  salon['status'] == 'pending' ? () { Navigator.pop(context); _reject(salon['id'] as String);  } : null,
-        onDelete: () { Navigator.pop(context); _delete(salon); },
+    Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => AdminSalonDetailPage(
+          salonId:       salon['id']     as String,
+          initialName:   salon['name']   as String? ?? '',
+          initialStatus: salon['status'] as String? ?? '',
+        ),
       ),
-    );
+    ).then((_) => _load(reset: true));
   }
 
   void _showAddSalon() {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
       builder: (_) => _AddSalonSheet(onCreated: (code) {
         Navigator.pop(context);
         _load(reset: true);
@@ -136,7 +107,8 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
             context: context,
             builder: (ctx) => AlertDialog(
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text('Salon Created!', style: TextStyle(fontWeight: FontWeight.bold)),
+              title: const Text('Salon Created!',
+                  style: TextStyle(fontWeight: FontWeight.bold)),
               content: Column(mainAxisSize: MainAxisSize.min, children: [
                 const Text('Share this secret code with the professional for login:'),
                 const SizedBox(height: 12),
@@ -146,8 +118,10 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
                     color: _p.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(12),
                   ),
-                  child: Text(code, style: TextStyle(fontSize: 28, fontWeight: FontWeight.bold,
-                      letterSpacing: 6, color: _p)),
+                  child: Text(code,
+                      style: TextStyle(
+                          fontSize: 28, fontWeight: FontWeight.bold,
+                          letterSpacing: 6, color: _p)),
                 ),
                 const SizedBox(height: 8),
                 TextButton.icon(
@@ -158,7 +132,8 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
               ]),
               actions: [
                 ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: _p, foregroundColor: Colors.white,
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: _p, foregroundColor: Colors.white,
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8))),
                   onPressed: () => Navigator.pop(ctx),
                   child: const Text('Done'),
@@ -173,13 +148,16 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
 
   @override
   Widget build(BuildContext context) {
-    final statusOptions = {'': 'All', 'pending': 'Pending', 'approved': 'Approved', 'rejected': 'Rejected'};
+    final statusOptions = {
+      '': 'All', 'pending': 'Pending', 'approved': 'Approved', 'rejected': 'Rejected',
+    };
 
     return Scaffold(
       backgroundColor: const Color(0xFFF5F7FA),
       appBar: AppBar(
         backgroundColor: _p,
-        title: const Text('Salons', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        title: const Text('Salons',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         centerTitle: true,
         iconTheme: const IconThemeData(color: Colors.white),
         bottom: PreferredSize(
@@ -196,34 +174,47 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
                   hintStyle: const TextStyle(color: Colors.white54),
                   prefixIcon: const Icon(Icons.search, color: Colors.white54),
                   suffixIcon: _searchCtrl.text.isNotEmpty
-                      ? IconButton(icon: const Icon(Icons.clear, color: Colors.white54),
+                      ? IconButton(
+                          icon: const Icon(Icons.clear, color: Colors.white54),
                           onPressed: () { _searchCtrl.clear(); _load(reset: true); })
                       : null,
                   filled: true,
                   fillColor: Colors.white.withValues(alpha: 0.15),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10), borderSide: BorderSide.none),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                  border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                      borderSide: BorderSide.none),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                   isDense: true,
                 ),
               ),
               const SizedBox(height: 8),
-              Row(children: [
-                ...statusOptions.entries.map((e) => Padding(
-                  padding: const EdgeInsets.only(right: 8),
-                  child: ChoiceChip(
-                    label: Text(e.value, style: TextStyle(fontSize: 12,
-                        color: _status == e.key ? Colors.white : Colors.white70)),
-                    selected: _status == e.key,
-                    onSelected: (_) { setState(() => _status = e.key); _load(reset: true); },
-                    selectedColor: Colors.white.withValues(alpha: 0.3),
-                    backgroundColor: Colors.white.withValues(alpha: 0.1),
-                    side: BorderSide(color: Colors.white.withValues(alpha: 0.3)),
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  ),
-                )),
-                const Spacer(),
-                Text('$_total total', style: const TextStyle(color: Colors.white70, fontSize: 12)),
-              ]),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: Row(children: [
+                  ...statusOptions.entries.map((e) => Padding(
+                    padding: const EdgeInsets.only(right: 8),
+                    child: ChoiceChip(
+                      label: Text(e.value,
+                          style: TextStyle(
+                              fontSize: 12, fontWeight: FontWeight.w600,
+                              color: _status == e.key ? Colors.white : Colors.black87)),
+                      selected: _status == e.key,
+                      onSelected: (_) {
+                        setState(() => _status = e.key);
+                        _load(reset: true);
+                      },
+                      selectedColor: _p,
+                      backgroundColor: Colors.white,
+                      side: BorderSide(
+                          color: _status == e.key ? _p : Colors.grey.shade300),
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                    ),
+                  )),
+                  Text('$_total total',
+                      style: const TextStyle(color: Colors.white70, fontSize: 12)),
+                ]),
+              ),
             ]),
           ),
         ),
@@ -257,7 +248,8 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
                       separatorBuilder: (context, index) => const SizedBox(height: 8),
                       itemBuilder: (_, i) {
                         if (i == _salons.length) {
-                          return const Center(child: Padding(padding: EdgeInsets.all(16),
+                          return const Center(child: Padding(
+                              padding: EdgeInsets.all(16),
                               child: CircularProgressIndicator(color: _p, strokeWidth: 2)));
                         }
                         return _salonCard(_salons[i] as Map<String, dynamic>);
@@ -269,30 +261,52 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
   }
 
   Widget _salonCard(Map<String, dynamic> salon) {
-    final status = salon['status'] as String? ?? 'pending';
-    final statusColor = status == 'approved' ? Colors.green.shade600
-        : status == 'pending' ? Colors.orange.shade600 : Colors.red.shade500;
+    final status    = salon['status']           as String? ?? 'pending';
+    final isBanned  = salon['isCurrentlyBanned'] as bool?  ?? (salon['isBanned'] as bool? ?? false);
+    final statusColor = status == 'approved'
+        ? Colors.green.shade600
+        : status == 'pending'
+            ? Colors.orange.shade600
+            : Colors.red.shade500;
 
     return GestureDetector(
       onTap: () => _showDetail(salon),
       child: Container(
         padding: const EdgeInsets.all(14),
         decoration: BoxDecoration(
-          color: Colors.white,
+          color: isBanned ? Colors.red.shade50 : Colors.white,
           borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: status == 'pending' ? Colors.orange.shade200 : Colors.transparent),
-          boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)],
+          border: Border.all(
+              color: isBanned
+                  ? Colors.red.shade200
+                  : status == 'pending'
+                      ? Colors.orange.shade200
+                      : Colors.transparent),
+          boxShadow: [
+            BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)
+          ],
         ),
         child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Row(children: [
             Expanded(child: Text(salon['name'] as String? ?? '',
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14))),
+            if (isBanned) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                decoration: BoxDecoration(
+                    color: Colors.red.shade600, borderRadius: BorderRadius.circular(6)),
+                child: const Text('BANNED',
+                    style: TextStyle(fontSize: 9, fontWeight: FontWeight.bold, color: Colors.white)),
+              ),
+              const SizedBox(width: 6),
+            ],
             _statusBadge(status, statusColor),
           ]),
           const SizedBox(height: 4),
           Text('${salon['city']}, ${salon['state']}',
               style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-          Text('Manager: ${salon['managerName'] ?? '—'}  ·  ${salon['managerPhone'] ?? ''}',
+          Text(
+              'Manager: ${salon['managerName'] ?? '—'}  ·  ${salon['managerPhone'] ?? ''}',
               style: TextStyle(fontSize: 11, color: Colors.grey.shade400)),
           if (status == 'pending') ...[
             const SizedBox(height: 10),
@@ -325,109 +339,14 @@ class _AdminSalonsTabState extends State<AdminSalonsTab> {
 
   Widget _statusBadge(String status, Color color) => Container(
     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-    decoration: BoxDecoration(color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
+    decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1), borderRadius: BorderRadius.circular(8)),
     child: Text(status.toUpperCase(),
         style: TextStyle(fontSize: 10, fontWeight: FontWeight.bold, color: color)),
   );
 }
 
-// ── Salon detail sheet ────────────────────────────────────────────────────────
-
-class _SalonDetailSheet extends StatelessWidget {
-  final Map<String, dynamic> salon;
-  final VoidCallback? onApprove;
-  final VoidCallback? onReject;
-  final VoidCallback onDelete;
-
-  const _SalonDetailSheet({
-    required this.salon,
-    required this.onApprove,
-    required this.onReject,
-    required this.onDelete,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final status = salon['status'] as String? ?? '';
-    final bStats = salon['bookingStats'] as Map<String, dynamic>? ?? {};
-
-    return DraggableScrollableSheet(
-      expand: false, initialChildSize: 0.6, maxChildSize: 0.92,
-      builder: (_, ctrl) => Container(
-        decoration: const BoxDecoration(color: Colors.white,
-            borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-        child: Column(children: [
-          const SizedBox(height: 8),
-          Container(width: 40, height: 4,
-              decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4))),
-          const SizedBox(height: 12),
-          Expanded(child: ListView(controller: ctrl, padding: const EdgeInsets.symmetric(horizontal: 20), children: [
-            Text(salon['name'] as String? ?? '',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-            const SizedBox(height: 4),
-            Text('${salon['city']}, ${salon['state']}',
-                style: TextStyle(color: Colors.grey.shade500, fontSize: 13)),
-            const Divider(height: 24),
-            _row(Icons.person_outline, 'Manager', '${salon['managerName'] ?? '—'}'),
-            _row(Icons.phone, 'Manager Phone', salon['managerPhone'] as String? ?? '—'),
-            _row(Icons.email_outlined, 'Manager Email', salon['managerEmail'] as String? ?? '—'),
-            _row(Icons.location_on_outlined, 'Address', salon['address'] as String? ?? '—'),
-            _row(Icons.access_time_outlined, 'Hours',
-                '${salon['openingTime'] ?? '—'} – ${salon['closingTime'] ?? '—'}'),
-            _row(Icons.calendar_today_outlined, 'Working Days', salon['workingDays'] as String? ?? '—'),
-            _row(Icons.star_outline, 'Rating',
-                '${salon['rating'] ?? 0} (${salon['reviewCount'] ?? 0} reviews)'),
-            _row(Icons.receipt_long_outlined, 'Total Bookings', '${bStats['totalBookings'] ?? 0}'),
-            _row(Icons.currency_rupee, 'Revenue', '₹${bStats['revenue'] ?? 0}'),
-            const SizedBox(height: 20),
-            if (onApprove != null && onReject != null) ...[
-              Row(children: [
-                Expanded(child: OutlinedButton(
-                  onPressed: onReject,
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  child: const Text('Reject'),
-                )),
-                const SizedBox(width: 10),
-                Expanded(child: ElevatedButton(
-                  onPressed: onApprove,
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.green.shade600,
-                      foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                  child: const Text('Approve'),
-                )),
-              ]),
-              const SizedBox(height: 10),
-            ],
-            if (status != 'pending')
-              SizedBox(width: double.infinity,
-                child: OutlinedButton.icon(
-                  onPressed: onDelete,
-                  icon: const Icon(Icons.delete_outline, size: 16),
-                  label: const Text('Delete Salon'),
-                  style: OutlinedButton.styleFrom(foregroundColor: Colors.red, side: const BorderSide(color: Colors.red),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10))),
-                ),
-              ),
-            const SizedBox(height: 20),
-          ])),
-        ]),
-      ),
-    );
-  }
-
-  Widget _row(IconData icon, String label, String value) => Padding(
-    padding: const EdgeInsets.symmetric(vertical: 5),
-    child: Row(children: [
-      Icon(icon, size: 16, color: Colors.grey.shade400),
-      const SizedBox(width: 10),
-      Text('$label: ', style: TextStyle(fontSize: 13, color: Colors.grey.shade500)),
-      Expanded(child: Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500))),
-    ]),
-  );
-}
-
-// ── Add salon sheet ───────────────────────────────────────────────────────────
+// ── Add salon sheet ────────────────────────────────────────────────────────────
 
 class _AddSalonSheet extends StatefulWidget {
   final void Function(String secretCode) onCreated;
@@ -438,25 +357,51 @@ class _AddSalonSheet extends StatefulWidget {
 }
 
 class _AddSalonSheetState extends State<_AddSalonSheet> {
-  final _nameCtrl    = TextEditingController();
-  final _addrCtrl    = TextEditingController();
-  final _cityCtrl    = TextEditingController();
-  final _stateCtrl   = TextEditingController();
-  final _pincodeCtrl = TextEditingController();
-  final _phoneCtrl   = TextEditingController();
-  final _mgrNameCtrl = TextEditingController();
-  final _mgrEmailCtrl= TextEditingController();
-  final _contactCtrl = TextEditingController();
-  bool _loading = false;
-  bool _submitted = false;
+  final _nameCtrl           = TextEditingController();
+  final _addrCtrl           = TextEditingController();
+  final _cityCtrl           = TextEditingController();
+  final _stateCtrl          = TextEditingController();
+  final _pincodeCtrl        = TextEditingController();
+  final _phoneCtrl          = TextEditingController();
+  final _mgrNameCtrl        = TextEditingController();
+  final _mgrEmailCtrl       = TextEditingController();
+  final _contactCtrl        = TextEditingController();
+  final _franchiseSearchCtrl = TextEditingController();
+
+  bool   _loading            = false;
+  bool   _submitted          = false;
+  bool   _isFranchise        = false;
+  String _franchiseId        = '';
+  String _franchiseName      = '';
+  List<Map<String, dynamic>> _franchiseResults  = [];
+  bool   _searchingFranchise = false;
 
   @override
   void dispose() {
     for (final c in [_nameCtrl, _addrCtrl, _cityCtrl, _stateCtrl, _pincodeCtrl,
-        _phoneCtrl, _mgrNameCtrl, _mgrEmailCtrl, _contactCtrl]) {
+        _phoneCtrl, _mgrNameCtrl, _mgrEmailCtrl, _contactCtrl, _franchiseSearchCtrl]) {
       c.dispose();
     }
     super.dispose();
+  }
+
+  Future<void> _searchFranchise(String query) async {
+    if (query.trim().isEmpty) { setState(() => _franchiseResults = []); return; }
+    setState(() => _searchingFranchise = true);
+    try {
+      final results = await ApiService.searchFranchises(query.trim());
+      if (mounted) {
+        setState(() {
+          _franchiseResults = results
+              .map((e) => {'id': e['id'] as String, 'name': e['name'] as String})
+              .toList();
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _franchiseResults = []);
+    } finally {
+      if (mounted) setState(() => _searchingFranchise = false);
+    }
   }
 
   Future<void> _submit() async {
@@ -464,6 +409,11 @@ class _AddSalonSheetState extends State<_AddSalonSheet> {
     if (_nameCtrl.text.trim().isEmpty || _addrCtrl.text.trim().isEmpty ||
         _cityCtrl.text.trim().isEmpty || _stateCtrl.text.trim().isEmpty ||
         _phoneCtrl.text.trim().isEmpty) { return; }
+
+    if (_isFranchise && _franchiseId.isEmpty && _franchiseName.isEmpty) {
+      AppSnackbar.error(context, 'Select a franchise or type a new franchise name.');
+      return;
+    }
 
     setState(() => _loading = true);
     try {
@@ -477,6 +427,9 @@ class _AddSalonSheetState extends State<_AddSalonSheet> {
         'managerName':   _mgrNameCtrl.text.trim(),
         'managerEmail':  _mgrEmailCtrl.text.trim(),
         'contactNumber': _contactCtrl.text.trim(),
+        'isFranchise':   _isFranchise,
+        if (_isFranchise && _franchiseId.isNotEmpty) 'franchiseId': _franchiseId,
+        if (_isFranchise && _franchiseName.isNotEmpty) 'franchiseName': _franchiseName,
       });
       final code = (res['salon'] as Map?)?['secretCode'] as String?
           ?? res['secretCode'] as String? ?? '';
@@ -495,21 +448,29 @@ class _AddSalonSheetState extends State<_AddSalonSheet> {
       child: DraggableScrollableSheet(
         expand: false, initialChildSize: 0.85, maxChildSize: 0.95,
         builder: (_, ctrl) => Container(
-          decoration: const BoxDecoration(color: Colors.white,
+          decoration: const BoxDecoration(
+              color: Colors.white,
               borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
           child: Column(children: [
             const SizedBox(height: 8),
             Container(width: 40, height: 4,
-                decoration: BoxDecoration(color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4))),
+                decoration: BoxDecoration(
+                    color: Colors.grey.shade300, borderRadius: BorderRadius.circular(4))),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
               child: Row(children: [
-                const Text('Add New Salon', style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
+                const Text('Add New Salon',
+                    style: TextStyle(fontSize: 17, fontWeight: FontWeight.bold)),
                 const Spacer(),
-                IconButton(icon: const Icon(Icons.close), onPressed: () => Navigator.pop(context)),
+                IconButton(
+                    icon: const Icon(Icons.close),
+                    onPressed: () => Navigator.pop(context)),
               ]),
             ),
-            Expanded(child: ListView(controller: ctrl, padding: const EdgeInsets.symmetric(horizontal: 20), children: [
+            Expanded(child: ListView(
+                controller: ctrl,
+                padding: const EdgeInsets.symmetric(horizontal: 20),
+                children: [
               _f('Salon Name *', _nameCtrl),
               _f('Address *', _addrCtrl),
               Row(children: [
@@ -519,23 +480,51 @@ class _AddSalonSheetState extends State<_AddSalonSheet> {
               ]),
               _f('Pincode', _pincodeCtrl, keyboard: TextInputType.number),
               const Divider(height: 24),
-              const Text('Manager Info', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+              const Text('Manager Info',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
               const SizedBox(height: 8),
               _f('Manager Phone *', _phoneCtrl, keyboard: TextInputType.phone),
               _f('Manager Name', _mgrNameCtrl),
               _f('Manager Email', _mgrEmailCtrl, keyboard: TextInputType.emailAddress),
               _f('Salon Contact Number', _contactCtrl, keyboard: TextInputType.phone),
-              const SizedBox(height: 24),
+              const Divider(height: 24),
+              // ── Franchise ──────────────────────────────────────────────
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: _isFranchise,
+                title: const Text('Is this salon part of a franchise?',
+                    style: TextStyle(fontSize: 14, fontWeight: FontWeight.w500)),
+                activeColor: _p,
+                onChanged: (val) => setState(() {
+                  _isFranchise = val ?? false;
+                  if (!_isFranchise) {
+                    _franchiseId = '';
+                    _franchiseName = '';
+                    _franchiseSearchCtrl.clear();
+                    _franchiseResults = [];
+                  }
+                }),
+              ),
+              if (_isFranchise) ...[
+                const SizedBox(height: 4),
+                _franchiseSection(),
+                const SizedBox(height: 8),
+              ],
+              const SizedBox(height: 16),
               SizedBox(
                 height: 50,
                 child: ElevatedButton(
                   onPressed: _loading ? null : _submit,
-                  style: ElevatedButton.styleFrom(backgroundColor: _p, foregroundColor: Colors.white,
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
+                  style: ElevatedButton.styleFrom(
+                      backgroundColor: _p, foregroundColor: Colors.white,
+                      shape:
+                          RoundedRectangleBorder(borderRadius: BorderRadius.circular(12))),
                   child: _loading
                       ? const SizedBox(width: 20, height: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2.5, color: Colors.white))
-                      : const Text('Create & Approve Salon', style: TextStyle(fontWeight: FontWeight.bold)),
+                          child: CircularProgressIndicator(
+                              strokeWidth: 2.5, color: Colors.white))
+                      : const Text('Create & Approve Salon',
+                          style: TextStyle(fontWeight: FontWeight.bold)),
                 ),
               ),
               const SizedBox(height: 24),
@@ -546,7 +535,8 @@ class _AddSalonSheetState extends State<_AddSalonSheet> {
     );
   }
 
-  Widget _f(String label, TextEditingController ctrl, {TextInputType? keyboard}) {
+  Widget _f(String label, TextEditingController ctrl,
+      {TextInputType? keyboard}) {
     final required = label.endsWith('*');
     final empty    = _submitted && required && ctrl.text.trim().isEmpty;
     return Padding(
@@ -561,15 +551,111 @@ class _AddSalonSheetState extends State<_AddSalonSheet> {
           decoration: InputDecoration(
             isDense: true,
             contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: empty ? Colors.red : Colors.grey.shade300)),
-            enabledBorder: OutlineInputBorder(borderRadius: BorderRadius.circular(10),
-                borderSide: BorderSide(color: empty ? Colors.red.shade400 : Colors.grey.shade300)),
+            border: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                    color: empty ? Colors.red : Colors.grey.shade300)),
+            enabledBorder: OutlineInputBorder(
+                borderRadius: BorderRadius.circular(10),
+                borderSide: BorderSide(
+                    color: empty ? Colors.red.shade400 : Colors.grey.shade300)),
             errorText: empty ? 'Required' : null,
           ),
         ),
       ]),
     );
   }
-}
 
+  Widget _franchiseSection() {
+    return Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+      if (_franchiseId.isNotEmpty || _franchiseName.isNotEmpty)
+        Container(
+          margin: const EdgeInsets.only(bottom: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+          decoration: BoxDecoration(
+            color: _p.withValues(alpha: 0.08),
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: _p.withValues(alpha: 0.3)),
+          ),
+          child: Row(children: [
+            const Icon(Icons.business, color: _p, size: 18),
+            const SizedBox(width: 8),
+            Expanded(child: Text(
+              _franchiseName.isNotEmpty ? _franchiseName : _franchiseId,
+              style: const TextStyle(fontWeight: FontWeight.w500),
+            )),
+            GestureDetector(
+              onTap: () => setState(() {
+                _franchiseId = '';
+                _franchiseName = '';
+                _franchiseSearchCtrl.clear();
+                _franchiseResults = [];
+              }),
+              child: const Icon(Icons.close, size: 16),
+            ),
+          ]),
+        ),
+      TextField(
+        controller: _franchiseSearchCtrl,
+        onChanged: _searchFranchise,
+        decoration: InputDecoration(
+          hintText: 'Search franchise group (e.g. Image Salon)',
+          isDense: true,
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+          prefixIcon: const Icon(Icons.search, size: 18),
+          border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Colors.grey.shade300)),
+          enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+              borderSide: BorderSide(color: Colors.grey.shade300)),
+        ),
+      ),
+      const SizedBox(height: 4),
+      if (_searchingFranchise)
+        const Padding(
+          padding: EdgeInsets.symmetric(vertical: 8),
+          child: Center(child: SizedBox(
+              height: 20, width: 20,
+              child: CircularProgressIndicator(strokeWidth: 2, color: _p))),
+        )
+      else if (_franchiseResults.isNotEmpty)
+        Container(
+          decoration: BoxDecoration(
+            border: Border.all(color: Colors.grey.shade200),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Column(
+            children: _franchiseResults.map((f) => ListTile(
+              dense: true,
+              leading: const Icon(Icons.business_outlined, color: _p),
+              title: Text(f['name'] as String),
+              onTap: () => setState(() {
+                _franchiseId   = f['id']   as String;
+                _franchiseName = f['name'] as String;
+                _franchiseSearchCtrl.text = f['name'] as String;
+                _franchiseResults = [];
+              }),
+            )).toList(),
+          ),
+        )
+      else if (_franchiseSearchCtrl.text.trim().isNotEmpty && !_searchingFranchise)
+        ListTile(
+          contentPadding: EdgeInsets.zero,
+          leading: const Icon(Icons.add_circle_outline, color: _p),
+          title: Text(
+            'Create "${_franchiseSearchCtrl.text.trim()}" as new group',
+            style: const TextStyle(fontSize: 13),
+          ),
+          onTap: () {
+            final name = _franchiseSearchCtrl.text.trim();
+            setState(() {
+              _franchiseId   = '';
+              _franchiseName = name;
+              _franchiseResults = [];
+            });
+          },
+        ),
+    ]);
+  }
+}

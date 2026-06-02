@@ -9,7 +9,12 @@ const Color kAdminPrimary = Color(0xFF1565C0);
 
 class AdminHomeScreen extends StatefulWidget {
   final String adminName;
-  const AdminHomeScreen({super.key, required this.adminName});
+  final bool isSuperAdmin;
+  const AdminHomeScreen({
+    super.key,
+    required this.adminName,
+    this.isSuperAdmin = true,
+  });
 
   @override
   State<AdminHomeScreen> createState() => _AdminHomeScreenState();
@@ -25,7 +30,7 @@ class _AdminHomeScreenState extends State<AdminHomeScreen> {
       const AdminUsersTab(),
       const AdminSalonsTab(),
       const AdminBookingsTab(),
-      AdminMoreTab(adminName: widget.adminName),
+      AdminMoreTab(adminName: widget.adminName, isSuperAdmin: widget.isSuperAdmin),
     ];
 
     return Scaffold(
