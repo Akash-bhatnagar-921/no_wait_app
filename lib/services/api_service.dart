@@ -288,6 +288,28 @@ class ApiService {
     return _decodeResponse(res, 'Subscription activation failed');
   }
 
+  // ================= INVOICES =================
+
+  static Future<List<dynamic>> getUserInvoices() async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.get(
+      Uri.parse('$baseUrl/users/invoices'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeListResponse(res, 'Failed to load invoices');
+  }
+
+  static Future<Map<String, dynamic>> getInvoiceDetail(String id) async {
+    final token = await getToken();
+    if (token == null) throw ApiException(401, 'Not authenticated');
+    final res = await http.get(
+      Uri.parse('$baseUrl/users/invoices/$id'),
+      headers: {'Authorization': 'Bearer $token'},
+    ).timeout(requestTimeout);
+    return _decodeResponse(res, 'Failed to load invoice');
+  }
+
   // ================= SALON OPEN/CLOSED STATUS =================
 
   static Future<void> updateSalonOpenStatus(bool isOpen) async {

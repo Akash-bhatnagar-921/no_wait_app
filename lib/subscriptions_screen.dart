@@ -1,5 +1,10 @@
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:razorpay_flutter/razorpay_flutter.dart';
 
 import 'models/user_profile_model.dart';
@@ -96,6 +101,8 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
   int _monthlyUsed = 0;
   String _userPhone = '';
   String _userEmail = '';
+  String _userName  = '';
+  List<dynamic> _invoices = [];
 
   @override
   void initState() {
@@ -109,11 +116,13 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
       ApiService.getSubscription(),
       ApiService.getMonthlyBookingCount(),
       ApiService.getProfile(),
+      ApiService.getUserInvoices().catchError((_) => <dynamic>[]),
     ]);
     if (mounted) {
-      final sub     = results[0] as Map<String, dynamic>;
-      final count   = results[1] as int;
-      final profile = results[2] as UserProfileModel?;
+      final sub      = results[0] as Map<String, dynamic>;
+      final count    = results[1] as int;
+      final profile  = results[2] as UserProfileModel?;
+      final invoices = results[3] as List<dynamic>;
       setState(() {
         _currentPlan  = sub['plan']?.toString() ?? 'free';
         final exp     = sub['expiresAt'];
@@ -121,6 +130,8 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
         _monthlyUsed  = count;
         _userPhone    = profile?.phone ?? '';
         _userEmail    = profile?.email ?? '';
+        _userName     = profile?.fullName ?? '';
+        _invoices     = invoices;
         _loading      = false;
       });
     }
@@ -355,6 +366,26 @@ class _SubscriptionsScreenState extends State<SubscriptionsScreen> {
                 ],
 
                 const SizedBox(height: 24),
+
+                // ── Billing History ───────────────────────────────────────
+                if (_invoices.isNotEmpty) ...[
+                  Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text('Billing History',
+                        style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.grey.shade800)),
+                  ),
+                  const SizedBox(height: 10),
+                  ..._invoices.map((inv) => _InvoiceRow(
+                    invoice: inv as Map<String, dynamic>,
+                    userName: _userName,
+                    userPhone: _userPhone,
+                    userEmail: _userEmail,
+                  )),
+                  const SizedBox(height: 16),
+                ],
               ]),
             ),
     );
@@ -516,6 +547,301 @@ class _PlanCard extends StatelessWidget {
                 fontWeight: FontWeight.bold,
                 letterSpacing: 1)),
       );
+}
+
+// ── Invoice row ───────────────────────────────────────────────────────────────
+
+class _InvoiceRow extends StatefulWidget {
+  final Map<String, dynamic> invoice;
+  final String userName;
+  final String userPhone;
+  final String userEmail;
+  const _InvoiceRow({
+    required this.invoice,
+    required this.userName,
+    required this.userPhone,
+    required this.userEmail,
+  });
+
+  @override
+  State<_InvoiceRow> createState() => _InvoiceRowState();
+}
+
+class _InvoiceRowState extends State<_InvoiceRow> {
+  bool _generating = false;
+
+  String _planLabel(String plan) {
+    switch (plan.toLowerCase()) {
+      case 'basic':                 return 'Basic Plan';
+      case 'pro':                   return 'Pro Plan';
+      case 'professional_starter':  return 'Professional Starter';
+      case 'professional_growth':   return 'Professional Growth';
+      case 'professional_premium':  return 'Professional Premium';
+      default:                      return plan;
+    }
+  }
+
+  String _fmtAmount(dynamic paise) {
+    final v = (paise is num ? paise : num.tryParse(paise?.toString() ?? '')) ?? 0;
+    return '₹${(v / 100).toStringAsFixed(2)}';
+  }
+
+  String _fmtDate(dynamic v) {
+    if (v == null) return '';
+    final dt = DateTime.tryParse(v.toString());
+    return dt != null ? DateFormat('d MMM yyyy').format(dt.toLocal()) : '';
+  }
+
+  Future<void> _downloadPdf() async {
+    setState(() => _generating = true);
+    try {
+      final bytes = Uint8List.fromList(await _buildPdf());
+      final inv   = widget.invoice;
+      final num   = inv['invoiceNumber'] as String? ?? 'invoice';
+      await Printing.sharePdf(bytes: bytes, filename: '$num.pdf');
+    } catch (_) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Could not generate PDF. Please try again.')),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _generating = false);
+    }
+  }
+
+  Future<Uint8List> _buildPdf() async {
+    final inv   = widget.invoice;
+    final num   = inv['invoiceNumber']  as String? ?? '';
+    final plan  = _planLabel(inv['plan'] as String? ?? '');
+    final date  = _fmtDate(inv['createdAt']);
+    final total = inv['totalAmount']    as int?    ?? 0;
+    final base  = inv['baseAmount']     as int?    ?? 0;
+    final tax   = inv['taxAmount']      as int?    ?? 0;
+    final cgst  = (tax / 2).round();
+    final sgst  = tax - cgst;
+    final pid   = inv['paymentId']      as String? ?? '';
+    final mode  = inv['paymentMode']    as String? ?? 'razorpay';
+
+    final name  = (inv['customerName']  as String?)?.isNotEmpty == true
+        ? inv['customerName'] as String
+        : widget.userName;
+    final phone = (inv['customerPhone'] as String?)?.isNotEmpty == true
+        ? inv['customerPhone'] as String
+        : widget.userPhone;
+    final email = (inv['customerEmail'] as String?)?.isNotEmpty == true
+        ? inv['customerEmail'] as String
+        : widget.userEmail;
+
+    final pdf = pw.Document();
+
+    const green  = PdfColor.fromInt(0xFF2D9248);
+    const grey5  = PdfColor.fromInt(0xFF757575);
+    const grey8  = PdfColor.fromInt(0xFF212121);
+    const border = PdfColor.fromInt(0xFFE0E0E0);
+    const bgLight = PdfColor.fromInt(0xFFF5F5F5);
+
+    pw.TextStyle heading(double sz, {PdfColor color = grey8, bool bold = false}) =>
+        pw.TextStyle(fontSize: sz, color: color,
+            fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal);
+
+    pdf.addPage(pw.Page(
+      pageFormat: PdfPageFormat.a4,
+      margin: const pw.EdgeInsets.all(40),
+      build: (ctx) => pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: [
+          // ── Header ──────────────────────────────────────────────────────
+          pw.Row(
+            mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: pw.CrossAxisAlignment.start,
+            children: [
+              pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.start, children: [
+                pw.Text('BAARI', style: pw.TextStyle(
+                    fontSize: 28, fontWeight: pw.FontWeight.bold, color: green)),
+                pw.SizedBox(height: 4),
+                pw.Text('Baari Technologies Pvt. Ltd.',
+                    style: heading(9, color: grey5)),
+                pw.Text('Mumbai, Maharashtra, India',
+                    style: heading(9, color: grey5)),
+                pw.Text('support@baari.app',
+                    style: heading(9, color: grey5)),
+              ]),
+              pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.end, children: [
+                pw.Text('TAX INVOICE',
+                    style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold,
+                        color: grey8)),
+                pw.SizedBox(height: 6),
+                pw.Text(num, style: heading(10, bold: true)),
+                pw.Text('Date: $date', style: heading(9, color: grey5)),
+              ]),
+            ],
+          ),
+
+          pw.SizedBox(height: 24),
+          pw.Divider(color: border, thickness: 0.5),
+          pw.SizedBox(height: 16),
+
+          // ── Bill To ──────────────────────────────────────────────────────
+          pw.Text('BILL TO', style: heading(8, color: grey5, bold: true)),
+          pw.SizedBox(height: 6),
+          if (name.isNotEmpty) pw.Text(name, style: heading(12, bold: true)),
+          if (phone.isNotEmpty) pw.Text(phone, style: heading(10, color: grey5)),
+          if (email.isNotEmpty) pw.Text(email, style: heading(10, color: grey5)),
+
+          pw.SizedBox(height: 20),
+
+          // ── Line items header ────────────────────────────────────────────
+          pw.Container(
+            color: bgLight,
+            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            child: pw.Row(children: [
+              pw.Expanded(flex: 5, child: pw.Text('DESCRIPTION',
+                  style: heading(9, color: grey5, bold: true))),
+              pw.Expanded(flex: 2, child: pw.Text('AMOUNT',
+                  style: heading(9, color: grey5, bold: true),
+                  textAlign: pw.TextAlign.right)),
+            ]),
+          ),
+
+          // ── Line item ────────────────────────────────────────────────────
+          pw.Container(
+            decoration: pw.BoxDecoration(border: pw.Border(
+                bottom: pw.BorderSide(color: border, width: 0.5))),
+            padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: pw.Row(children: [
+              pw.Expanded(flex: 5, child: pw.Column(
+                crossAxisAlignment: pw.CrossAxisAlignment.start,
+                children: [
+                  pw.Text(plan, style: heading(11, bold: true)),
+                  pw.Text('Monthly subscription · Valid 30 days',
+                      style: heading(9, color: grey5)),
+                ],
+              )),
+              pw.Expanded(flex: 2, child: pw.Text(_fmtAmount(base),
+                  style: heading(11), textAlign: pw.TextAlign.right)),
+            ]),
+          ),
+
+          pw.SizedBox(height: 12),
+
+          // ── Totals ───────────────────────────────────────────────────────
+          pw.Align(
+            alignment: pw.Alignment.centerRight,
+            child: pw.SizedBox(
+              width: 200,
+              child: pw.Column(children: [
+                _summaryRow('Subtotal',     _fmtAmount(base), grey5, heading),
+                _summaryRow('CGST @ 9%',    _fmtAmount(cgst), grey5, heading),
+                _summaryRow('SGST @ 9%',    _fmtAmount(sgst), grey5, heading),
+                pw.SizedBox(height: 4),
+                pw.Divider(color: border, thickness: 0.5),
+                pw.SizedBox(height: 4),
+                _summaryRow('Total',        _fmtAmount(total), green, heading, bold: true),
+              ]),
+            ),
+          ),
+
+          pw.SizedBox(height: 24),
+          pw.Divider(color: border, thickness: 0.5),
+          pw.SizedBox(height: 12),
+
+          // ── Payment info ─────────────────────────────────────────────────
+          pw.Text('PAYMENT DETAILS', style: heading(8, color: grey5, bold: true)),
+          pw.SizedBox(height: 6),
+          if (pid.isNotEmpty) ...[
+            pw.Text('Payment Reference: $pid', style: heading(9, color: grey5)),
+          ],
+          pw.Text('Payment Method: ${mode == 'razorpay' ? 'Razorpay (Online)' : mode}',
+              style: heading(9, color: grey5)),
+
+          pw.Spacer(),
+
+          // ── Footer ───────────────────────────────────────────────────────
+          pw.Divider(color: border, thickness: 0.5),
+          pw.SizedBox(height: 8),
+          pw.Center(
+            child: pw.Text(
+              'Thank you for choosing Baari! This is a computer-generated invoice.',
+              style: heading(8, color: grey5),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
+      ),
+    ));
+
+    return pdf.save();
+  }
+
+  static pw.Widget _summaryRow(
+    String label,
+    String value,
+    PdfColor color,
+    pw.TextStyle Function(double, {PdfColor color, bool bold}) heading, {
+    bool bold = false,
+  }) =>
+      pw.Padding(
+        padding: const pw.EdgeInsets.symmetric(vertical: 2),
+        child: pw.Row(
+          mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+          children: [
+            pw.Text(label, style: heading(10, color: color, bold: bold)),
+            pw.Text(value, style: heading(10, color: color, bold: bold)),
+          ],
+        ),
+      );
+
+  @override
+  Widget build(BuildContext context) {
+    final inv     = widget.invoice;
+    final num     = inv['invoiceNumber'] as String? ?? '';
+    final plan    = _planLabel(inv['plan'] as String? ?? '');
+    final total   = inv['totalAmount']   as int?    ?? 0;
+    final date    = _fmtDate(inv['createdAt']);
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 10),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.grey.shade200),
+        boxShadow: [BoxShadow(color: Colors.black.withValues(alpha: 0.04), blurRadius: 6)],
+      ),
+      child: Row(children: [
+        Container(
+          width: 40, height: 40,
+          decoration: BoxDecoration(
+            color: const Color(0xFF2D9248).withValues(alpha: 0.09),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: const Icon(Icons.receipt_long_outlined,
+              color: Color(0xFF2D9248), size: 20),
+        ),
+        const SizedBox(width: 12),
+        Expanded(child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+          Text(plan,
+              style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 13)),
+          const SizedBox(height: 2),
+          Text('$num  ·  $date',
+              style: TextStyle(fontSize: 11, color: Colors.grey.shade500)),
+        ])),
+        Text(_fmtAmount(total),
+            style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+        const SizedBox(width: 10),
+        _generating
+            ? const SizedBox(width: 22, height: 22,
+                child: CircularProgressIndicator(strokeWidth: 2, color: Color(0xFF2D9248)))
+            : IconButton(
+                icon: const Icon(Icons.download_outlined, size: 22),
+                color: const Color(0xFF2D9248),
+                tooltip: 'Download Invoice',
+                onPressed: _downloadPdf,
+              ),
+      ]),
+    );
+  }
 }
 
 // ── Payment sheet — Razorpay checkout ────────────────────────────────────────
